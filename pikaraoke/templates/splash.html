@@ -28,6 +28,7 @@
     scorePhrasesUrl: "{{ url_for('splash.get_score_phrases') }}",
   };
 </script>
+<script src="{{ url_for('static', filename='js/intermission.js') }}"></script>
 <script src="{{ url_for('static', filename='js/splash.js') }}"></script>
 {% endblock %} {% block body %}
 <div id="top-container" class="overlay">
@@ -195,6 +196,22 @@
     </div>
   </div>
 </div>
+
+<div id="intermission-overlay" style="display: none">
+  <div class="intermission-card">
+    {# MSG: Big label on the TV while break music plays between singers. #}
+    <div class="intermission-label">{% trans %}Intermission{% endtrans %}</div>
+    <div id="intermission-countdown" class="intermission-countdown">0:00</div>
+    <div class="intermission-next">
+      {# MSG: Label before the next singer's name during a break. #}
+      <span>{% trans %}Next singer:{% endtrans %}</span>
+      <b id="intermission-next-singer"></b>
+    </div>
+    <div id="intermission-next-song" class="intermission-song"></div>
+  </div>
+</div>
+
+<audio id="intermission-audio" preload="auto"></audio>
 
 <audio id="background-music">
   <source src="" type="audio/mpeg">
@@ -366,6 +383,31 @@
   .timestamp {
     font-family: monospace;
   }
+  #intermission-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(40, 10, 60, 0.85), rgba(0, 0, 0, 0.92));
+  }
+  .intermission-card { text-align: center; color: #fff; }
+  .intermission-label {
+    font-size: 3rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 300;
+  }
+  .intermission-countdown {
+    font-size: 9rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .intermission-next { font-size: 2.4rem; }
+  .intermission-next b { color: #48c78e; }
+  .intermission-song { font-size: 1.6rem; opacity: 0.8; margin-top: 8px; }
   #splash-notification {
     position: absolute;
     top: 15px;

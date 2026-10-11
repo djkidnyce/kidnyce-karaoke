@@ -3,8 +3,12 @@
    Based on bulmaswatch dark theme
    =================================== */
 
-/* Import Lato font */
-@import url("https://fonts.googleapis.com/css2?family=Lato:wght@300;400;500;700&display=swap");
+/* Lato served from this host (SIL OFL 1.1, from @fontsource/lato 5.3.0) instead of Google Fonts:
+   no third party request from guests' phones, and it works on a venue LAN with no internet. */
+@font-face{font-family:"Lato";font-style:normal;font-weight:300;font-display:swap;src:url("fonts/lato/lato-latin-300-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:400;font-display:swap;src:url("fonts/lato/lato-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:500;font-display:swap;src:url("fonts/lato/lato-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:700;font-display:swap;src:url("fonts/lato/lato-latin-700-normal.woff2") format("woff2")}
 
 /* ===================================
    COLOR VARIABLES

@@ -30,11 +30,12 @@ from pikaraoke.lib.current_app import get_karaoke_instance, is_admin
 from pikaraoke.lib.ffmpeg import is_ffmpeg_installed
 from pikaraoke.lib.file_resolver import delete_tmp_dir
 from pikaraoke.lib.get_platform import get_platform, has_js_runtime, is_windows
+from pikaraoke.lib.guest_gate import install_guest_gate
 from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.url_prefix import BasePathMiddleware
 from pikaraoke.lib.youtube_dl import upgrade_youtubedl
 from pikaraoke.routes import API_BLUEPRINTS, INTERNAL_BLUEPRINTS
-from pikaraoke.routes.socket_events import setup_socket_events
+from pikaraoke.routes.socket_events import kick_guests, setup_socket_events
 
 _ = flask_babel.gettext
 
@@ -64,7 +65,11 @@ app = Flask(__name__)
 
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Not SESSION_COOKIE_SECURE: on plain HTTP the browser would never send it back.
+# Secure only when the public URL is HTTPS: on plain HTTP the browser would never
+# send it back. Behind Nginx with Let's Encrypt it is, and the cookie carries the
+# join code and the admin session.
+app.config["SESSION_COOKIE_SECURE"] = bool(args.url and args.url.lower().startswith("https://"))
+app.config["REQUIRE_JOIN_CODE"] = bool(args.require_join_code)
 app.permanent_session_lifetime = datetime.timedelta(days=90)
 app.jinja_env.add_extension("jinja2.ext.i18n")
 app.config["BABEL_TRANSLATION_DIRECTORIES"] = "translations"
@@ -109,7 +114,10 @@ for bp in API_BLUEPRINTS:
 for bp in INTERNAL_BLUEPRINTS:
     app.register_blueprint(bp)
 
-# After registration, so every endpoint the gate reads exists.
+# After registration, so every endpoint the gate reads exists. The join gate goes
+# first, so a phone without the code is sent to the join page rather than told it
+# lacks admin rights.
+install_guest_gate(app)
 install_auth_gate(app)
 document_auth(app, api)
 
@@ -274,6 +282,8 @@ def main() -> None:
         socketio=socketio,
         preferred_language=args.preferred_language,
         url_base_path=args.base_path,
+        require_join_code=args.require_join_code,
+        intermission_music_path=args.intermission_music_path,
     )
 
     # expose karaoke object to the flask app
@@ -290,6 +300,7 @@ def main() -> None:
 
         return handler
 
+    k.events.on("join_code_changed", lambda: kick_guests(socketio))
     k.events.on("download_started", _broadcast_in_context("download_started"))
     k.events.on("download_stopped", _broadcast_in_context("download_stopped"))
 
@@ -301,6 +312,11 @@ def main() -> None:
     if args.admin_password is not None:
         admin_auth.set_password(args.admin_password)
 
+    if args.require_join_code and not admin_auth.is_password_set():
+        logging.warning(
+            "--require-join-code is on but no admin password is set: every phone that "
+            "joins becomes an admin. Set one with --admin-password or on the Settings page."
+        )
     if not admin_auth.is_password_set():
         logging.info(
             "No admin password set: everyone on the network can control playback and "
@@ -326,7 +342,7 @@ def main() -> None:
     # lookup it otherwise runs at startup, which can hang for a long time on hosts
     # without working reverse DNS (observed hanging PiKaraoke launch on macOS).
     server = WSGIServer(
-        ("0.0.0.0", int(args.port)),
+        (args.bind_address, int(args.port)),
         app,
         log=None,
         error_log=logging.getLogger(),

@@ -1,0 +1,77 @@
+{% extends 'base.html' %} {% block body %}
+<section class="join-wrap">
+  <div class="box join-card">
+    <img class="join-logo" src="{{ url_for('images.logo') }}" alt="logo" />
+    <h1 class="title is-4 has-text-centered">
+      {# MSG: Heading on the page where a guest types the session join code. #}
+      {% trans %}Join the karaoke{% endtrans %}
+    </h1>
+    <p class="has-text-centered mb-4">
+      {# MSG: Instruction under the join heading. #}
+      {% trans %}Scan the QR code on the big screen, or type the 6 character code shown under it.{% endtrans %}
+    </p>
+    {% if error %}
+    <div class="notification is-danger is-light" role="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('join.join_form') }}" autocomplete="off">
+      <div class="field">
+        <div class="control">
+          <input
+            class="input is-large join-code-input"
+            type="text"
+            name="code"
+            value="{{ code }}"
+            maxlength="9"
+            inputmode="text"
+            autocapitalize="characters"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="ABC234"
+            aria-label="{{ _('Join code') }}"
+            required
+            autofocus
+          />
+        </div>
+      </div>
+      <button class="button is-success is-large is-fullwidth" type="submit">
+        {# MSG: Button that submits the session join code. #}
+        {% trans %}Join{% endtrans %}
+      </button>
+    </form>
+
+    <details class="mt-5">
+      {# MSG: Toggle that reveals the admin login on the join page. #}
+      <summary class="has-text-grey-light">{% trans %}Host login{% endtrans %}</summary>
+      <form method="post" action="{{ url_for('admin.auth') }}" class="mt-3">
+        <div class="field">
+          <input class="input" type="password" name="admin_password" autocomplete="current-password"
+            aria-label="{{ _('Admin password') }}" required />
+        </div>
+        <button class="button is-link is-fullwidth" type="submit">
+          {# MSG: Button that logs the host in from the join page. #}
+          {% trans %}Log in{% endtrans %}
+        </button>
+      </form>
+    </details>
+  </div>
+</section>
+
+<style>
+  body { background: #0b0b10; }
+  .join-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .join-card { width: 100%; max-width: 420px; }
+  .join-logo { display: block; margin: 0 auto 16px; max-width: 220px; }
+  .join-code-input {
+    text-align: center;
+    letter-spacing: 0.35em;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    text-transform: uppercase;
+  }
+</style>
+{% endblock %}

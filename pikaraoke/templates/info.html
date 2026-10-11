@@ -55,7 +55,7 @@
 				let timeoutId = setTimeout(function() {
 					$this.attr("data-start-value", val);
 
-					if (pref == "bg_music_volume" || pref == "volume") {
+					if (pref == "bg_music_volume" || pref == "volume" || pref == "intermission_volume") {
 						val = val / 100;
 					}
 					changePreferences(pref, val);
@@ -473,6 +473,93 @@
 
 		{# MSG: Title of the user preferences section. #}
 		<h2>{% trans %}User Preferences{% endtrans %}</h2>
+
+		<div class="card">
+			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
+				<div class="media-content">
+					{# MSG: Title of the settings section for break music between singers. #}
+					<h3 class="mb-0">{% trans %}Intermission (break music){% endtrans %}</h3>
+				</div>
+			</header>
+			<div class="card-content collapsible-content">
+				<div class="content">
+					<div class="user-preference-container">
+						<input id="pref-intermission" class="user-preference-checkbox checkbox" type="checkbox" data-pref="enable_intermission" {% if enable_intermission == True %}checked{% endif %} />
+						<label class="label" for="pref-intermission">{# MSG: Checkbox that turns on break music between singers. #} {% trans %}Play break music between singers{% endtrans %}</label>
+					</div>
+					<div class="user-preference-container is-align-items-center">
+						<input id="pref-intermission-minutes" class="user-preference-input input" type="number" min="0.5" max="30" step="0.5" data-pref="intermission_minutes" data-start-value="{{ intermission_minutes }}" value="{{ intermission_minutes }}" />
+						<label class="label" for="pref-intermission-minutes">{# MSG: Number box for how long each break lasts. #} {% trans %}Break length in minutes (max 30){% endtrans %}</label>
+					</div>
+					<div class="user-preference-container is-align-items-center">
+						<input id="pref-intermission-every" class="user-preference-input input" type="number" min="1" max="20" step="1" data-pref="intermission_every" data-start-value="{{ intermission_every }}" value="{{ intermission_every }}" />
+						<label class="label" for="pref-intermission-every">{# MSG: Number box for how many singers go between breaks. #} {% trans %}Take a break after this many singers{% endtrans %}</label>
+					</div>
+					<div class="user-preference-container is-align-items-center">
+						<input id="pref-intermission-volume" class="user-preference-input input" type="number" min="0" max="100" step="5" data-pref="intermission_volume" data-start-value="{{ intermission_volume }}" value="{{ intermission_volume }}" />
+						<label class="label" for="pref-intermission-volume">{# MSG: Number box for break music volume. #} {% trans %}Break music volume (min 0, max 100){% endtrans %}</label>
+					</div>
+					<div class="user-preference-container">
+						<input id="pref-intermission-fill" class="user-preference-checkbox checkbox" type="checkbox" data-pref="intermission_fill" {% if intermission_fill == True %}checked{% endif %} />
+						<label class="label" for="pref-intermission-fill">{# MSG: Checkbox that tops up a break with one more song faded out at the time limit. #} {% trans %}Fill the whole break: add one more song and fade it out when time is up{% endtrans %}</label>
+					</div>
+					<p class="is-size-7">
+						{# MSG: Label before the folder that holds break music. #}{% trans %}Music folder:{% endtrans %}
+						<code>{{ intermission_music_path or '' }}</code>
+						<span id="intermission-library"></span>
+						<button id="intermission-rescan" class="button is-small ml-2" type="button">{# MSG: Button that looks for new break music. #}{% trans %}Rescan{% endtrans %}</button>
+					</p>
+					<div class="is-flex is-align-items-center" style="gap: 8px">
+						<input id="intermission-preview-minutes" class="input is-small" style="max-width: 90px" type="number" min="0.5" max="30" step="0.5" value="{{ intermission_minutes }}" aria-label="{{ _('Minutes') }}" />
+						<button id="intermission-preview-btn" class="button is-small is-link" type="button">{# MSG: Button that shows which songs fit a break of that length. #}{% trans %}Calculate songs{% endtrans %}</button>
+					</div>
+					<div id="intermission-preview" class="is-size-7 mt-2"></div>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			(function () {
+				var urls = {
+					status: "{{ url_for('intermission.status') }}",
+					preview: "{{ url_for('intermission.preview') }}",
+					rescan: "{{ url_for('intermission.rescan') }}"
+				};
+				// {# MSG: Summary of the break music library. {count} is a number of tracks, {minutes} a number of minutes. #}
+				var libraryText = {{ _('{count} tracks, {minutes} minutes') | tojson }};
+				// {# MSG: Result of the break planner. {count} songs fill {planned} of a {target} break. #}
+				var planText = {{ _('{count} songs fill {planned} of {target}') | tojson }};
+				// {# MSG: Note when the last break song will be faded out at the time limit. #}
+				var fadeText = {{ _('The last song fades out when time is up.') | tojson }};
+				function mmss(seconds) {
+					seconds = Math.round(seconds);
+					return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+				}
+				function showLibrary() {
+					$.getJSON(urls.status).done(function (s) {
+						$("#intermission-library").text(libraryText.replace("{count}", s.track_count).replace("{minutes}", s.library_minutes));
+					});
+				}
+				$("#intermission-rescan").on("click", function () {
+					var $b = $(this).addClass("is-loading");
+					$.post(urls.rescan).always(function () { $b.removeClass("is-loading"); showLibrary(); });
+				});
+				$("#intermission-preview-btn").on("click", function () {
+					$.getJSON(urls.preview, { minutes: $("#intermission-preview-minutes").val() }).done(function (p) {
+						var $out = $("#intermission-preview").empty();
+						$out.append($("<p>").text(planText.replace("{count}", p.track_count)
+							.replace("{planned}", mmss(p.planned_seconds)).replace("{target}", mmss(p.target_seconds))));
+						var $ol = $("<ol>");
+						p.tracks.forEach(function (t) { $ol.append($("<li>").text(t.title + " (" + mmss(t.duration) + ")")); });
+						$out.append($ol);
+						if (p.fade_last) $out.append($("<p>").text(fadeText));
+					}).fail(function (xhr) {
+						$("#intermission-preview").text((xhr.responseJSON && xhr.responseJSON.error) || window.translations.errorLabel);
+					});
+				});
+				showLibrary();
+			})();
+		</script>
 
 		<div class="card">
 			<header class="card-header py-3 px-5 collapsible-header is-collapsed">

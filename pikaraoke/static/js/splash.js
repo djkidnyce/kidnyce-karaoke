@@ -28,6 +28,14 @@ let clockIntervalId = null;
 // Identifies the playback this screen is showing. Reported back to the server so
 // events about a song that has already ended can't be applied to its successor.
 let currentPlaybackId = null;
+// ?singer=1 is the singer's screen in a two screen setup. The crowd screen carries
+// the QR code and join code, so this one stays clean: lyrics and who is next.
+const isSingerScreen = new URLSearchParams(window.location.search).get('singer') === '1';
+// Created on first use: this script runs in <head>, before the <audio> exists.
+let intermissionPlayer = null;
+const getIntermissionPlayer = () =>
+  (intermissionPlayer ??= KidnyceIntermission.createPlayer(document.getElementById('intermission-audio')));
+const intermissionCountdown = KidnyceIntermission.createCountdown((text) => $("#intermission-countdown").text(text));
 
 // Browser detection
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -252,8 +260,9 @@ const updateBackgroundMediaState = (immediate = false) => {
 
 const flashNotification = (message, categoryClass) => {
   const sn = $("#splash-notification");
-  if (sn.html()) return;
-  sn.html(message);
+  if (sn.text()) return;
+  // Text, not HTML: notifications carry singer names typed on guests' phones.
+  sn.text(message);
   sn.addClass(categoryClass);
   sn.fadeIn();
   setTimeout(() => {
@@ -318,20 +327,22 @@ const handleNowPlayingUpdate = (np) => {
 
   if (np.now_playing) {
 
-    // Handle updating now playing HTML
-    let nowPlayingHtml = `<span>${np.now_playing}</span> `;
+    // Built as text nodes: titles and singer names come from guests' phones.
+    const $song = $("#now-playing-song").empty().append($("<span>").text(np.now_playing), " ");
     if (np.now_playing_transpose !== 0) {
-      nowPlayingHtml += `<span class='is-size-6 has-text-success'><b>Key</b>: ${getSemitonesLabel(np.now_playing_transpose)} </span>`;
+      $song.append(
+        $("<span class='is-size-6 has-text-success'>")
+          .append($("<b>").text("Key"), ": ", document.createTextNode(getSemitonesLabel(np.now_playing_transpose) + " "))
+      );
     }
-    $("#now-playing-song").html(nowPlayingHtml);
-    $("#now-playing-singer").html(np.now_playing_user);
+    $("#now-playing-singer").text(np.now_playing_user);
     $("#now-playing").fadeIn();
   } else {
     $("#now-playing").fadeOut();
   }
   if (np.up_next) {
-    $("#up-next-song").html(np.up_next);
-    $("#up-next-singer").html(np.next_user);
+    $("#up-next-song").text(np.up_next);
+    $("#up-next-singer").text(np.next_user);
     $("#up-next").fadeIn();
   } else {
     $("#up-next").fadeOut();
@@ -342,6 +353,7 @@ const handleNowPlayingUpdate = (np) => {
     idleTime = 0;
   }
   updateBackgroundMediaState();
+  applyIntermission(np);
 
   const video = getVideoPlayer();
 
@@ -432,6 +444,34 @@ const handleNowPlayingUpdate = (np) => {
     }, playbackStartTimeout);
   }
 }
+
+// Break music between singers. Only the master plays it, so two screens never
+// double the audio. Every screen shows the countdown.
+const applyIntermission = (np) => {
+  const brk = np.intermission;
+  const active = Boolean(brk && !brk.pending && brk.tracks && brk.tracks.length);
+  if (active) {
+    $("#intermission-next-singer").text(np.next_user || "");
+    $("#intermission-next-song").text(np.up_next || "");
+    $("#intermission-overlay").fadeIn();
+  } else {
+    $("#intermission-overlay").fadeOut();
+  }
+  intermissionCountdown.sync(active ? brk : null);
+  if (isMaster && autoplayConfirmed && active) {
+    getIntermissionPlayer().sync(brk);
+  } else {
+    getIntermissionPlayer().stop(active ? 300 : 2500);
+  }
+};
+
+const refreshQrCode = () => {
+  // The join code rotated: reload the image, past the browser cache.
+  $("img").filter((_, el) => /\/qrcode(\?|$)/.test(el.getAttribute("src") || "")).each((_, el) => {
+    const base = el.getAttribute("src").split("?")[0];
+    el.setAttribute("src", `${base}?v=${Date.now()}`);
+  });
+};
 
 async function loadNowPlaying() {
   handleNowPlayingUpdate(await $.get(withBasePath("/api/now_playing")));
@@ -580,8 +620,8 @@ const PREFERENCE_EFFECTS = {
     PikaraokeConfig.hideOverlay = v;
     $("#bottom-container, #top-container").toggle(!v);
   },
-  hide_url:            (v) => { $(".splash-url").toggle(!v); },
-  hide_qr_code:        (v) => { $(".splash-qr-image").toggle(!v); },
+  hide_url:            (v) => { $(".splash-url").toggle(!v && !isSingerScreen); },
+  hide_qr_code:        (v) => { $(".splash-qr-image").toggle(!v && !isSingerScreen); },
   hide_logo:           (v) => { $("#logo-container img.logo").toggle(!v); },
   hide_session_name:   (v) => {
     PikaraokeConfig.hideSessionName = v;
@@ -696,6 +736,7 @@ const setupSocketEvents = () => {
     }
   });
   socket.on("now_playing", handleNowPlayingUpdate);
+  socket.on("join_code_changed", refreshQrCode);
   socket.on("preferences_update", applyPreferenceUpdate);
   socket.on("preferences_reset", applyPreferencesReset);
   socket.on("score_phrases_update", (phrases) => { scoreReviews = phrases; });
@@ -781,6 +822,7 @@ const applyUIScale = (scale) => {
 
 $(function () {
   // Setup various features and listeners
+  if (isSingerScreen) $(".splash-qr-image, .splash-url").hide();
   applyUIScale(effectiveUIScale());
   if (PikaraokeConfig.showSplashClock) startClock();
   setupScreensaver();

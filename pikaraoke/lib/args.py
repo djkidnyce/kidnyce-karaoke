@@ -147,6 +147,19 @@ def parse_pikaraoke_args() -> argparse.Namespace:
         required=False,
     )
 
+    server.add_argument(
+        "--bind-address",
+        help="Address the web server listens on. Use 127.0.0.1 behind a reverse proxy such as Nginx so nothing reaches the app directly. (default: 0.0.0.0)",
+        default="0.0.0.0",
+        required=False,
+    )
+    server.add_argument(
+        "--require-join-code",
+        action="store_true",
+        help="Phones must present the six character join code of the session being hosted. The QR code carries it. Screens on this machine are exempt.",
+        required=False,
+    )
+
     library = parser.add_argument_group("Song library and downloads")
     library.add_argument(
         "-d",
@@ -307,6 +320,13 @@ def parse_pikaraoke_args() -> argparse.Namespace:
         required=False,
     )
     background.add_argument(
+        "--intermission-music-path",
+        nargs="+",
+        help="Folder of break music played between singers. Defaults to the background music path. Turn breaks on and set their length on the Settings page.",
+        default=None,
+        required=False,
+    )
+    background.add_argument(
         "--disable-bg-music",
         action="store_true",
         help="Disable background music on splash screen",
@@ -408,6 +428,7 @@ def parse_pikaraoke_args() -> argparse.Namespace:
     logo_path = arg_path_parse(args.logo_path)
     bg_music_path = arg_path_parse(args.bg_music_path)
     bg_video_path = arg_path_parse(args.bg_video_path)
+    intermission_music_path = arg_path_parse(args.intermission_music_path)
 
     if args.dolphly:
         logo_path = os.path.join(os.path.dirname(__file__), "..", "static", "images", "dolphly.png")
@@ -424,6 +445,7 @@ def parse_pikaraoke_args() -> argparse.Namespace:
     args.logo_path = logo_path
     args.bg_music_path = bg_music_path
     args.bg_video_path = bg_video_path
+    args.intermission_music_path = intermission_music_path
     args.download_path = dl_path
 
     return args

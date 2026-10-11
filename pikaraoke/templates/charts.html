@@ -1,0 +1,193 @@
+{% extends 'base.html' %}
+
+{% block scripts %}
+<script>
+	(function () {
+		var urls = {
+			mostRequested: {{ url_for('charts.most_requested') | tojson }},
+			numberOnes: {{ url_for('charts.number_ones') | tojson }},
+			refresh: {{ url_for('charts.refresh_number_ones') | tojson }},
+			search: {{ url_for('search.search') | tojson }}
+		};
+		var labels = {
+			// {# MSG: Count of requests for one song on the charts page. {count} is a number. #}
+			requests: {{ _('{count} requests') | tojson }},
+			// {# MSG: Count of weeks a song spent at number one. {count} is a number. #}
+			weeks: {{ _('{count} weeks at #1') | tojson }},
+			// {# MSG: Button that searches for a karaoke version of a chart song. #}
+			singIt: {{ _('Sing it') | tojson }},
+			// {# MSG: Shown when nobody has requested a song yet. #}
+			noRequests: {{ _('No requests yet. Queue a song and it lands here.') | tojson }},
+			// {# MSG: Shown when a number one search finds nothing. #}
+			noMatches: {{ _('No number ones match that.') | tojson }}
+		};
+		var pageSize = 100;
+		var state = { scope: {{ ('session' if has_session else 'all') | tojson }}, decade: "", q: "", offset: 0 };
+
+		function searchUrl(artist, title) {
+			return urls.search + "?" + $.param({ search_string: (artist ? artist + " " : "") + title });
+		}
+
+		function singButton(artist, title) {
+			return $("<a class='button is-small is-success is-rounded'>")
+				.attr("href", searchUrl(artist, title)).text(labels.singIt);
+		}
+
+		function loadMostRequested() {
+			$.getJSON(urls.mostRequested, { scope: state.scope, limit: 25 }).done(function (data) {
+				var $list = $("#requested-list").empty();
+				var $hero = $("#requested-hero").empty().hide();
+				if (!data.songs.length) {
+					$list.append($("<p class='has-text-grey'>").text(labels.noRequests));
+					return;
+				}
+				var top = data.songs[0];
+				$hero.append($("<div class='hero-rank'>").text("#1"))
+					.append($("<div class='hero-title'>").text(top.title))
+					.append($("<div class='hero-meta'>").text(labels.requests.replace("{count}", top.requests)))
+					.show();
+				data.songs.forEach(function (song, i) {
+					var pct = Math.max(4, Math.round((song.requests / top.requests) * 100));
+					var $row = $("<div class='bar-row'>");
+					$row.append($("<span class='bar-rank'>").text(i + 1));
+					var $body = $("<div class='bar-body'>");
+					$body.append($("<div class='bar-label'>").text(song.title));
+					$body.append($("<div class='bar-track'>").append($("<div class='bar-fill'>").css("width", pct + "%")));
+					$row.append($body);
+					$row.append($("<span class='bar-count'>").text(song.requests));
+					$list.append($row);
+				});
+			});
+		}
+
+		function loadNumberOnes(append) {
+			if (!append) state.offset = 0;
+			var params = { limit: pageSize, offset: state.offset };
+			if (state.decade) params.decade = state.decade;
+			if (state.q) params.q = state.q;
+			$.getJSON(urls.numberOnes, params).done(function (data) {
+				var $list = $("#number-ones-list");
+				if (!append) $list.empty();
+				if (!data.songs.length && !append) {
+					$list.append($("<p class='has-text-grey'>").text(labels.noMatches));
+				}
+				data.songs.forEach(function (song) {
+					var $row = $("<div class='one-row'>");
+					var $text = $("<div class='one-text'>");
+					$text.append($("<div class='one-title'>").text(song.song));
+					$text.append($("<div class='one-meta'>").text(
+						song.artist + " · " + song.first_week.slice(0, 4) + " · " +
+						labels.weeks.replace("{count}", song.weeks)));
+					$row.append($text).append(singButton(song.artist, song.song));
+					$list.append($row);
+				});
+				state.offset += data.songs.length;
+				$("#more-number-ones").toggle(data.songs.length === pageSize);
+			});
+		}
+
+		$(function () {
+			$("#scope-tabs a").on("click", function (e) {
+				e.preventDefault();
+				state.scope = $(this).data("scope");
+				$("#scope-tabs li").removeClass("is-active");
+				$(this).parent().addClass("is-active");
+				loadMostRequested();
+			});
+			$("#decade-select").on("change", function () { state.decade = $(this).val(); loadNumberOnes(false); });
+			var timer = null;
+			$("#number-ones-search").on("input", function () {
+				var value = $(this).val();
+				clearTimeout(timer);
+				timer = setTimeout(function () { state.q = value.trim(); loadNumberOnes(false); }, 300);
+			});
+			$("#more-number-ones").on("click", function () { loadNumberOnes(true); });
+			$("#refresh-number-ones").on("click", function () {
+				var $btn = $(this).addClass("is-loading");
+				$.post(urls.refresh).done(function (data) {
+					showNotification("+" + data.added + " · " + data.last_chart, "is-success");
+					loadNumberOnes(false);
+				}).fail(function () {
+					showNotification(window.translations.errorLabel, "is-danger");
+				}).always(function () { $btn.removeClass("is-loading"); });
+			});
+			loadMostRequested();
+			loadNumberOnes(false);
+		});
+	})();
+</script>
+{% endblock %}
+
+{% block header %}
+<style>
+	#requested-hero {
+		display: none;
+		text-align: center;
+		padding: 18px 12px;
+		margin-bottom: 18px;
+		border-radius: 12px;
+		background: linear-gradient(135deg, #3a1c71, #d76d77 60%, #ffaf7b);
+		color: #fff;
+	}
+	.hero-rank { font-size: 2.6rem; font-weight: 800; line-height: 1; }
+	.hero-title { font-size: 1.4rem; font-weight: 700; margin-top: 6px; overflow-wrap: anywhere; }
+	.hero-meta { opacity: 0.9; }
+	.bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+	.bar-rank { width: 2em; text-align: right; font-weight: 700; flex-shrink: 0; }
+	.bar-body { flex: 1; min-width: 0; }
+	.bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.bar-track { height: 8px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+	.bar-fill { height: 8px; background: #48c78e; border-radius: 4px; }
+	.bar-count { width: 2.5em; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+	.one-row {
+		display: flex; align-items: center; gap: 12px;
+		padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+	}
+	.one-text { flex: 1; min-width: 0; }
+	.one-title { font-weight: 600; overflow-wrap: anywhere; }
+	.one-meta { font-size: 0.85rem; opacity: 0.75; }
+	.charts-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+	.charts-controls .control.is-expanded { flex: 1; min-width: 160px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{# MSG: Heading for the most requested songs chart. #}
+<h2>{% trans %}Most requested{% endtrans %}</h2>
+<div class="tabs is-small" id="scope-tabs">
+	<ul>
+		<li class="{{ 'is-active' if has_session }}"><a href="#" data-scope="session">{# MSG: Tab for tonight's session. #}{% trans %}Tonight{% endtrans %}</a></li>
+		<li class="{{ 'is-active' if not has_session }}"><a href="#" data-scope="all">{# MSG: Tab for all sessions ever. #}{% trans %}All time{% endtrans %}</a></li>
+	</ul>
+</div>
+<div id="requested-hero" aria-live="polite"></div>
+<div id="requested-list"></div>
+
+{# MSG: Heading for the list of Billboard Hot 100 number one songs. #}
+<h2 class="mt-6">{% trans %}Number 1 hits{% endtrans %}</h2>
+<p class="is-size-7 has-text-grey mb-3">
+	{{ number_one_count }} {# MSG: Note under the number one hits heading, followed by a date. #}{% trans %}Billboard Hot 100 number ones. Last chart counted:{% endtrans %} {{ last_chart }}
+</p>
+<div class="charts-controls">
+	<div class="select">
+		<select id="decade-select" aria-label="{{ _('Decade') }}">
+			<option value="">{# MSG: Option to show every decade. #}{% trans %}All decades{% endtrans %}</option>
+			{% for decade in decades %}
+			<option value="{{ decade }}">{{ decade }}s</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div class="control is-expanded">
+		<input id="number-ones-search" class="input" type="search" placeholder="{{ _('Song or artist') }}" aria-label="{{ _('Song or artist') }}" />
+	</div>
+	{% if admin %}
+	<button id="refresh-number-ones" class="button is-link is-light" type="button">
+		{# MSG: Button that downloads the newest Billboard charts. #}{% trans %}Update charts{% endtrans %}
+	</button>
+	{% endif %}
+</div>
+<div id="number-ones-list"></div>
+<button id="more-number-ones" class="button is-fullwidth mt-3" type="button" style="display: none">
+	{# MSG: Button that loads more number one songs. #}{% trans %}Show more{% endtrans %}
+</button>
+{% endblock %}

@@ -56,6 +56,12 @@ class PreferenceManager:
         "metadata_provider": "itunes",
         "itunes_search_country": "US",
         "suggestion_name_order": "artist_title",
+        # Break music between singers
+        "enable_intermission": False,
+        "intermission_minutes": 5,
+        "intermission_every": 1,
+        "intermission_volume": 0.8,
+        "intermission_fill": False,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:

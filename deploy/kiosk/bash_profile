@@ -1,0 +1,5 @@
+# Written by deploy/install-pi.sh for the kiosk user.
+# On tty1, start the two karaoke screens. Anywhere else (SSH), a normal shell.
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec startx @@PREFIX@@/kiosk/kiosk-session.sh -- :0 vt1 -nocursor -s 0 -dpms -nolisten tcp >"$HOME/.xsession.log" 2>&1
+fi

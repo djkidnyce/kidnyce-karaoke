@@ -488,6 +488,11 @@
                  room came for: the stats and the log, open to every device.
                  Below it is running the machine and running the night. -->
             <div class="navbar-dropdown is-right">
+              <a id="charts" class="navbar-item" href="{{ url_for('charts.charts') }}">
+                <i class="icon icon-sort-up"></i>
+                {# MSG: Dropdown link to the most requested songs and the number one hits. #}
+                <span>{% trans %}Charts{% endtrans %}</span>
+              </a>
               <a id="rankings" class="navbar-item" href="{{ url_for('sessions.rankings') }}">
                 <i class="icon icon-th-list-outline"></i>
                 {# MSG: Dropdown link to the most-played songs and most active singers. #}

@@ -334,6 +334,27 @@ class TestPlaybackControllerEndSong:
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
     @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    def test_song_ending_fires_before_cleanup_yields(self, mock_delete, mock_sleep, test_prefs):
+        """The run loop can pick the next song the moment cleanup sleeps, so a
+        listener counting turns must hear song_ending before that sleep."""
+        events = EventSystem()
+        pc = PlaybackController(test_prefs, events, lambda x, remove_youtube_id=True: x)
+        pc.playback_id = PLAYBACK_UID
+        pc.is_playing = True
+        pc.stream_manager.kill_ffmpeg = MagicMock()
+        order = []
+        events.on(
+            "song_ending", lambda reason=None: order.append(("ending", reason, pc.is_playing))
+        )
+        events.on("song_ended", lambda reason=None: order.append(("ended", reason, pc.is_playing)))
+        mock_sleep.side_effect = lambda *_: order.append(("sleep",))
+
+        pc.end_song("complete", PLAYBACK_UID)
+
+        assert order == [("ending", "complete", False), ("sleep",), ("ended", "complete", False)]
+
+    @patch("pikaraoke.lib.playback_controller.time.sleep")
+    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
     def test_end_song_ignores_stale_playback_id(self, mock_delete, mock_sleep, test_prefs):
         """A player ending the previous song must not tear down its successor."""
         events = EventSystem()

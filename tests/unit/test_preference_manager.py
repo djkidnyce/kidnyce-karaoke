@@ -295,6 +295,11 @@ def test_preference_manager_defaults_exist():
         "metadata_provider",
         "itunes_search_country",
         "suggestion_name_order",
+        "enable_intermission",
+        "intermission_minutes",
+        "intermission_every",
+        "intermission_volume",
+        "intermission_fill",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

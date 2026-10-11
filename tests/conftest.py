@@ -27,6 +27,7 @@ _BASE_TEMPLATE_ENDPOINTS = [
     ("/search", "search.search"),
     ("/info", "info.info"),
     ("/rankings", "sessions.rankings"),
+    ("/charts", "charts.charts"),
     ("/history", "sessions.history"),
     ("/sessions", "sessions.sessions"),
     ("/api/sessions/singers", "sessions_api.get_singers"),
@@ -234,6 +235,16 @@ class MockPlayHistory:
         return self.session is not None
 
 
+class MockIntermission:
+    """Minimal mock of IntermissionManager: never due, never active."""
+
+    def is_due(self) -> bool:
+        return False
+
+    def as_payload(self) -> dict | None:
+        return None
+
+
 class MockKeepAwake:
     """Minimal mock of KeepAwake that records whether the lock is held."""
 
@@ -266,6 +277,7 @@ class MockKaraoke:
         self.playback_controller = MockPlaybackController()
         self._playback_lock = threading.Lock()
         self.play_history = MockPlayHistory()
+        self.intermission = MockIntermission()
         self.volume = 0.85
         self.running = True
         self.now_playing_notification = None

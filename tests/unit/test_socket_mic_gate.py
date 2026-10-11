@@ -30,6 +30,7 @@ ADMIN_EVENTS = [
 
 # The playback path, which splash screens drive with no admin session.
 PUBLIC_EVENTS = [
+    ("connect", ()),
     ("end_song", ("complete",)),
     ("start_song", ()),
     ("clear_notification", ()),
@@ -44,6 +45,8 @@ def reset_splash_state():
     """The elected master is module state, so it outlives the test that set it."""
     yield
     socket_events.splash_connections.clear()
+    socket_events.crowd_connections.clear()
+    socket_events.guest_sids.clear()
     socket_events.master_splash_id = None
 
 

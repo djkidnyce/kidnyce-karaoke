@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# kidnyce-karaoke: day to day controls for the karaoke Pi.
+#
+#   kidnyce-karaoke status          services, certificate, address, join code
+#   kidnyce-karaoke code            current join code and the QR address
+#   kidnyce-karaoke new-code        issue a new join code (everyone scans again)
+#   kidnyce-karaoke password        show the admin password (root only)
+#   kidnyce-karaoke set-password    choose a new admin password
+#   kidnyce-karaoke doctor          check everything and say what is wrong
+#   kidnyce-karaoke logs [app|nginx|screens|ddns]
+#   kidnyce-karaoke restart [app|screens|all]
+#   kidnyce-karaoke update-ytdlp    pull the newest yt-dlp now
+#   kidnyce-karaoke ddns            update the DNS record now
+set -euo pipefail
+
+ETC_DIR=/etc/kidnyce-karaoke
+# shellcheck source=/dev/null
+source "$ETC_DIR/install.env"
+DOMAIN=${DOMAIN:?} PORT=${PORT:?} PREFIX=${PREFIX:?} CERT=${CERT:?}
+KIOSK=${KIOSK:-0} KIOSK_USER=${KIOSK_USER:-kiosk}
+
+APP="http://127.0.0.1:$PORT"
+ok() { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
+warn() { printf '  \033[33mWARN\033[0m  %s\n' "$*"; }
+bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
+need_root() { [[ $EUID -eq 0 ]] || { echo "Run with sudo: sudo kidnyce-karaoke $*" >&2; exit 1; }; }
+
+# Admin session against the local app, for actions only the host may take.
+# The password comes from the root only file and goes to curl on stdin.
+admin_curl() {
+    local jar
+    jar=$(mktemp)
+    trap 'rm -f "$jar"' RETURN
+    jq -n --rawfile p "$ETC_DIR/admin-password" '{admin_password: ($p | rtrimstr("\n"))}' |
+        curl -fsS -c "$jar" -H "Content-Type: application/json" --data-binary @- "$APP/api/auth" >/dev/null
+    curl -fsS -b "$jar" "$@"
+}
+
+join_info() {
+    curl -fsS --max-time 5 "$APP/api/display/state" | jq -r '.join | "\(.code)\t\(.join_url)"'
+}
+
+cmd_code() {
+    local code url
+    IFS=$'\t' read -r code url < <(join_info)
+    echo "Join code: $code"
+    echo "QR opens:  $url"
+}
+
+cmd_new_code() {
+    need_root new-code
+    admin_curl -X POST "$APP/api/join_code/rotate" | jq -r '"New join code: \(.code)\nQR opens:      \(.join_url)"'
+}
+
+cmd_password() {
+    need_root password
+    cat "$ETC_DIR/admin-password"
+}
+
+cmd_set_password() {
+    need_root set-password
+    local pw pw2
+    read -r -s -p "New admin password (12+ characters): " pw
+    echo
+    read -r -s -p "Again: " pw2
+    echo
+    [[ $pw == "$pw2" ]] || { echo "Passwords differ." >&2; exit 1; }
+    ((${#pw} >= 12)) || { echo "Use at least 12 characters." >&2; exit 1; }
+    install -m 600 -o root -g root /dev/null "$ETC_DIR/admin-password"
+    printf '%s\n' "$pw" >"$ETC_DIR/admin-password"
+    "$PREFIX/bin/kidnyce-set-admin-password" <"$ETC_DIR/admin-password"
+    systemctl restart kidnyce-karaoke
+    echo "Admin password changed. Every device has to log in again."
+}
+
+cert_days_left() {
+    local cert=$1 end
+    end=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2) || return 1
+    echo $((($(date -d "$end" +%s) - $(date +%s)) / 86400))
+}
+
+cmd_status() {
+    local unit
+    echo "Kid Nyce Karaoke  https://$DOMAIN"
+    for unit in kidnyce-karaoke nginx kidnyce-karaoke-firewall; do
+        if systemctl is-active --quiet "$unit"; then ok "$unit running"; else bad "$unit not running"; fi
+    done
+    if [[ -f $CERT ]]; then
+        ok "certificate valid for $(cert_days_left "$CERT") more days"
+    fi
+    echo "  LAN address: $(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
+    cmd_code 2>/dev/null || warn "app not answering yet"
+}
+
+cmd_doctor() {
+    local failures=0 lan resolved days model throttled
+    echo "Checking Kid Nyce Karaoke"
+
+    model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo unknown)
+    echo "  Device: $model, $(awk '/MemTotal/ {printf "%.1f GB RAM", $2 / 1048576}' /proc/meminfo)"
+
+    for unit in kidnyce-karaoke nginx; do
+        if systemctl is-active --quiet "$unit"; then ok "$unit running"; else bad "$unit not running"; failures=$((failures + 1)); fi
+    done
+    if systemctl is-active --quiet kidnyce-karaoke-firewall; then ok "firewall loaded"; else warn "firewall not loaded"; fi
+
+    if curl -fsS --max-time 5 "$APP/api/healthz" >/dev/null; then ok "app answers on loopback"; else bad "app does not answer on $APP"; failures=$((failures + 1)); fi
+    if curl -fsS --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null 2>&1; then
+        ok "HTTPS through Nginx with a trusted certificate"
+    elif curl -fsSk --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null 2>&1; then
+        warn "HTTPS works but the certificate is not trusted (self signed or staging)"
+    else
+        bad "HTTPS through Nginx failed"; failures=$((failures + 1))
+    fi
+
+    if [[ -f $CERT ]]; then
+        days=$(cert_days_left "$CERT")
+        if ((days > 14)); then ok "certificate: $days days left"; else warn "certificate: only $days days left, check: sudo certbot renew --dry-run"; fi
+    else
+        bad "no certificate at $CERT"; failures=$((failures + 1))
+    fi
+
+    lan=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+    resolved=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR == 1 {print $1}')
+    if [[ -n $lan && $resolved == "$lan" ]]; then
+        ok "$DOMAIN resolves to this Pi ($lan)"
+    else
+        warn "$DOMAIN resolves to ${resolved:-nothing}, this Pi is ${lan:-offline}. Phones will not find it by name. Run: sudo kidnyce-karaoke ddns"
+    fi
+
+    if [[ -x $PREFIX/bin/deno ]]; then ok "deno $("$PREFIX/bin/deno" --version | awk 'NR == 1 {print $2}') for yt-dlp"; else warn "deno missing, YouTube downloads may fail"; fi
+    ok "yt-dlp $("$PREFIX/venv/bin/python" -I -m yt_dlp --version 2>/dev/null || echo unknown)"
+
+    if command -v vcgencmd >/dev/null; then
+        throttled=$(vcgencmd get_throttled | cut -d= -f2)
+        if [[ $throttled == 0x0 ]]; then ok "power and temperature fine ($(vcgencmd measure_temp | cut -d= -f2))"; else warn "throttled=$throttled: weak power supply or overheating. Use the official 5V 3A supply."; fi
+    fi
+
+    if [[ ${KIOSK:-0} == 1 ]]; then
+        if pgrep -u "$KIOSK_USER" -f 'kiosk-session.sh' >/dev/null; then ok "screen session running"; else warn "screen session not running (is a TV plugged in? check: kidnyce-karaoke logs screens)"; fi
+        if [[ -n $(pgrep -u "$KIOSK_USER" -f -- '--user-data-dir=.*/crowd' || true) ]]; then ok "crowd screen up"; else warn "crowd screen not up (needs a second TV on HDMI 1)"; fi
+        if command -v aplay >/dev/null; then echo "  Sound devices:"; aplay -l 2>/dev/null | awk '/^card/ {print "    " $0}'; fi
+    fi
+
+    echo
+    if ((failures)); then echo "$failures problem(s) found."; exit 1; fi
+    echo "All good."
+}
+
+cmd_logs() {
+    case "${1:-app}" in
+        app) journalctl -u kidnyce-karaoke -n 200 --no-pager ;;
+        nginx) tail -n 100 /var/log/nginx/error.log ;;
+        screens) tail -n 200 "/home/$KIOSK_USER/kiosk.log" ;;
+        ddns) journalctl -u kidnyce-karaoke-ddns -n 50 --no-pager ;;
+        *) echo "logs: app, nginx, screens or ddns" >&2; exit 1 ;;
+    esac
+}
+
+cmd_restart() {
+    need_root restart
+    case "${1:-all}" in
+        app) systemctl restart kidnyce-karaoke ;;
+        screens) pkill -u "$KIOSK_USER" -f kiosk-session.sh || true ;;
+        all) systemctl restart kidnyce-karaoke nginx; pkill -u "$KIOSK_USER" -f kiosk-session.sh || true ;;
+        *) echo "restart: app, screens or all" >&2; exit 1 ;;
+    esac
+}
+
+case "${1:-status}" in
+    status) cmd_status ;;
+    code) cmd_code ;;
+    new-code) cmd_new_code ;;
+    password) cmd_password ;;
+    set-password) cmd_set_password ;;
+    doctor) cmd_doctor ;;
+    logs) cmd_logs "${2:-app}" ;;
+    restart) cmd_restart "${2:-all}" ;;
+    update-ytdlp) need_root update-ytdlp; systemctl start kidnyce-karaoke-ytdlp; "$PREFIX/venv/bin/python" -I -m yt_dlp --version ;;
+    ddns) need_root ddns; /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record checked." ;;
+    -h | --help | help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) echo "Unknown command: $1 (try: kidnyce-karaoke help)" >&2; exit 1 ;;
+esac

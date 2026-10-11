@@ -1,0 +1,62 @@
+# Kid Nyce Karaoke app server. Written by deploy/install-pi.sh; edits are overwritten.
+# Listens on loopback only. Nginx is the only way in from the network.
+[Unit]
+Description=Kid Nyce Karaoke (PiKaraoke fork)
+Documentation=https://github.com/vicwomg/pikaraoke
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@APP_USER@@
+Group=@@APP_USER@@
+WorkingDirectory=@@DATA_DIR@@
+Environment=HOME=@@DATA_DIR@@
+Environment=PATH=@@PREFIX@@/bin:@@PREFIX@@/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-@@ETC_DIR@@/app.env
+ExecStart=@@PREFIX@@/venv/bin/pikaraoke \
+    --headless \
+    --bind-address 127.0.0.1 \
+    --port @@PORT@@ \
+    --url https://@@DOMAIN@@ \
+    --require-join-code \
+    --download-path @@DATA_DIR@@/songs \
+    --intermission-music-path @@DATA_DIR@@/music \
+    --skip-youtubedl-upgrade \
+    $PIKARAOKE_EXTRA_ARGS
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+
+# Sandboxing. The app needs its data folder, the network and child processes
+# (ffmpeg, yt-dlp, deno) and nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=@@DATA_DIR@@
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+# Deno (run by yt-dlp) is a JIT, so W^X memory cannot be enforced here.
+MemoryDenyWriteExecute=no
+MemoryHigh=1G
+MemoryMax=1536M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

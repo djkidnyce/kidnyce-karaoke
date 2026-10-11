@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import qrcode
 from flask_babel import _
@@ -26,14 +26,18 @@ from pikaraoke.lib.get_platform import (
     get_platform,
     is_raspberry_pi,
 )
+from pikaraoke.lib.intermission import IntermissionManager, TrackLibrary
+from pikaraoke.lib.join_codes import JoinCodeManager
 from pikaraoke.lib.karaoke_database import KaraokeDatabase
 from pikaraoke.lib.keep_awake import KeepAwake
 from pikaraoke.lib.library_scanner import LibraryScanner, ScanResult
 from pikaraoke.lib.network import get_ip
+from pikaraoke.lib.number_ones import NumberOnes
 from pikaraoke.lib.play_history_manager import PlayHistoryManager
 from pikaraoke.lib.playback_controller import PlaybackController
 from pikaraoke.lib.preference_manager import PreferenceManager
 from pikaraoke.lib.queue_manager import QueueManager
+from pikaraoke.lib.request_stats import RequestStatsManager
 from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.sound_manager import SoundManager
 from pikaraoke.lib.url_prefix import append_base_path_to_url
@@ -71,6 +75,8 @@ class Karaoke:
     volume: float
 
     qr_code_path: str | None = None
+    # Bumped each time the QR image changes, so screens can bust their cache.
+    qr_version: int = 0
     base_path: str = os.path.dirname(__file__)
     loop_interval: int = 500  # in milliseconds
     default_logo_path: str = os.path.join(base_path, "static", "images", "logo.png")
@@ -100,11 +106,13 @@ class Karaoke:
         config_file_path: str = "config.ini",
         download_path: str = "/usr/lib/pikaraoke/songs",
         hide_splash_screen: bool | None = None,
+        intermission_music_path: str | None = None,
         log_level: int = logging.DEBUG,
         logo_path: str | None = None,
         port: int = 5555,
         prefer_hostname: bool | None = None,
         preferred_language: str | None = None,
+        require_join_code: bool = False,
         socketio=None,
         streaming_format: str = "hls",
         url: str | None = None,
@@ -183,6 +191,8 @@ class Karaoke:
             socketio: SocketIO instance for real-time event emission.
             preferred_language: Language code for UI (e.g., 'en', 'de_DE').
             enable_folder_browsing: Offer a Folders view on the Songs page.
+            require_join_code: Phones must present the session join code.
+            intermission_music_path: Folder of break music. Defaults to bg_music_path.
         """
         logging.basicConfig(
             format="[%(asctime)s] %(levelname)s: %(message)s",
@@ -218,6 +228,8 @@ class Karaoke:
         self.prefer_hostname = prefer_hostname
         self.bg_music_path = self.default_bg_music_path if bg_music_path is None else bg_music_path
         self.bg_video_path = self.default_bg_video_path if bg_video_path is None else bg_video_path
+        self.intermission_music_path = intermission_music_path
+        self.require_join_code = require_join_code
         self.streaming_format = streaming_format
         self.socketio = socketio
         self.url_override = url
@@ -248,8 +260,6 @@ class Karaoke:
         # Held across "pop the next song and claim it", and by rename_song, so a
         # rename cannot land on a song that has left the queue but is not yet claimed.
         self._playback_lock = threading.Lock()
-
-        self.generate_qr_code()
 
         # Set preferred language from command line if provided (persists to config)
         if preferred_language:
@@ -307,6 +317,8 @@ class Karaoke:
         # Play history recording and reporting (subscribes to song_ended itself)
         self.play_history = PlayHistoryManager(db=self.db, events=self.events)
 
+        self._init_kidnyce_features()
+
         # Initialize and start download manager
         self.download_manager = DownloadManager(
             events=self.events,
@@ -329,6 +341,42 @@ class Karaoke:
             logging.info("No existing database found, scanning song directory")
             result = self._scanner.scan(self.download_path)
             self._apply_scan_result(result)
+
+    def current_session_uuid(self) -> str | None:
+        session = self.play_history.get_current_session()
+        return session["uuid"] if session else None
+
+    def _init_kidnyce_features(self) -> None:
+        """Join codes, break music, request stats and the number one charts."""
+        self.join_codes = JoinCodeManager(self.db, self.events, self.current_session_uuid)
+        self.events.on("join_code_changed", self.generate_qr_code)
+        self.generate_qr_code()
+
+        self.request_stats = RequestStatsManager(
+            self.db,
+            self.events,
+            get_session_uuid=self.current_session_uuid,
+            get_youtube_id=lambda path: self.db.get_song_identity(path)[1],
+        )
+        self.number_ones = NumberOnes(self.db)
+
+        self.intermission_library = TrackLibrary(self.db, self.get_intermission_music_path)
+        self.intermission = IntermissionManager(
+            preferences=self.preferences,
+            events=self.events,
+            library=self.intermission_library,
+            track_url=lambda rel: append_base_path_to_url(
+                "/intermission/track/" + quote(rel.replace(os.sep, "/")), self.url_base_path
+            ),
+        )
+        self.intermission_library.scan_in_background()
+
+    def get_intermission_music_path(self) -> str | None:
+        """The break music folder: its own setting, else the background music folder."""
+        path = self.intermission_music_path or self.bg_music_path
+        if path and os.path.isfile(path):
+            return os.path.dirname(path)
+        return path
 
     def _apply_scan_result(self, result: ScanResult) -> None:
         """Update SongList and emit notifications after a scan."""
@@ -466,7 +514,7 @@ class Karaoke:
             box_size=1,
             border=4,
         )
-        qr.add_data(self.url)
+        qr.add_data(self.join_codes.join_url(self.url) if self.require_join_code else self.url)
         qr.make()
         img = qr.make_image(image_factory=PyPNGImage)
         # Use writable data directory instead of program directory.
@@ -475,6 +523,7 @@ class Karaoke:
         data_dir = get_data_directory()
         self.qr_code_path = os.path.join(data_dir, f"qrcode-{self.port}.png")
         img.save(self.qr_code_path)  # type: ignore[arg-type]
+        self.qr_version += 1
 
     def send_notification(self, message: str, color: str = "primary") -> None:
         """Send a notification to the web interface.
@@ -555,7 +604,9 @@ class Karaoke:
         # Insert the same song at the top of the queue with transposition.
         # The stream ends but the performance does not, so play history keeps
         # the existing play open rather than logging a second one.
-        queued, message = self.queue_manager.enqueue(filename, user, semitones, True)
+        queued, message = self.queue_manager.enqueue(
+            filename, user, semitones, True, count_as_request=False
+        )
         if not queued:
             # Skipping now would end the song with nothing to restart it: the
             # singer loses their turn, and play history holds the play open
@@ -653,6 +704,7 @@ class Karaoke:
             # too. The KJ singer field gates on this, and session_changed emits
             # this payload, so starting a session elsewhere updates it live.
             "has_session": self.play_history.has_active_session(),
+            "intermission": self.intermission.as_payload(),
         }
 
     def _relay_to_browser(self, event: str) -> None:
@@ -684,6 +736,21 @@ class Karaoke:
                 namespace="/",
             )
 
+    def _run_intermission(self) -> None:
+        """Hold the next singer while the break music plays.
+
+        Ends when the planned songs run out, when the host ends it, or when the
+        queue empties, since a break with nobody waiting is just background music.
+        """
+        if self.intermission.start() is None:
+            return
+        while self.running and self.intermission.tick():
+            if not self.queue_manager.queue:
+                self.intermission.finish()
+                break
+            self.handle_run_loop()
+        self.intermission.finish()
+
     def run(self) -> None:
         """Main run loop - processes queue and plays songs.
 
@@ -705,6 +772,10 @@ class Karaoke:
                 # Start next song from queue if not currently playing
                 if len(self.queue_manager.queue) > 0 and not self.playback_controller.is_playing:
                     self.reset_now_playing()
+                    if self.intermission.is_due():
+                        self._run_intermission()
+                        if not self.queue_manager.queue:
+                            continue
                     # Splash delay between songs
                     splash_delay = self.preferences.get_or_default("splash_delay")
                     i = 0

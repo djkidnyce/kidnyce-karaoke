@@ -105,6 +105,12 @@ def info():
         mic_passthrough_enabled=k.enable_mic_passthrough,
         keep_awake=k.keep_awake,
         keep_awake_unsupported=keep_awake.unsupported_reason(),
+        enable_intermission=k.enable_intermission,
+        intermission_minutes=k.intermission_minutes,
+        intermission_every=k.intermission_every,
+        intermission_volume=int(k.intermission_volume * 100),
+        intermission_fill=k.intermission_fill,
+        intermission_music_path=k.get_intermission_music_path(),
     )
 
 

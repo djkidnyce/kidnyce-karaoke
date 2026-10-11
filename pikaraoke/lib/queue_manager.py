@@ -117,8 +117,14 @@ class QueueManager:
         semitones: int = 0,
         add_to_front: bool = False,
         log_action: bool = True,
+        count_as_request: bool = True,
     ) -> list[bool | str]:
-        """Add a song to the queue. Returns [success, message]."""
+        """Add a song to the queue. Returns [success, message].
+
+        count_as_request: False for queue entries nobody asked for, such as a
+        transpose restarting the same song or the randomizer, so the most
+        requested chart only counts real demand.
+        """
         title = self._resolve_title(song_path)
 
         if self.is_song_in_queue(song_path):
@@ -163,6 +169,8 @@ class QueueManager:
                 self.queue.insert(insert_pos, queue_item)
             else:
                 self.queue.append(queue_item)
+        if count_as_request:
+            self._events.emit("song_requested", song_path, user, title)
         self._events.emit("queue_update")
         self._events.emit("now_playing_update")
         return [
@@ -213,7 +221,7 @@ class QueueManager:
         selected = random.sample(eligible_songs, sample_size)
 
         for song in selected:
-            self.enqueue(song, "Randomizer")
+            self.enqueue(song, "Randomizer", count_as_request=False)
 
         if sample_size < amount:
             logging.warning("Ran out of songs! Only added %d" % sample_size)

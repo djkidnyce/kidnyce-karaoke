@@ -287,6 +287,11 @@ class KaraokeDatabase:
         with self._lock, self._conn:
             return self._conn.execute(sql, params)
 
+    def executemany(self, sql: str, rows: list[tuple]) -> None:
+        """Run one write statement per row, all in a single transaction."""
+        with self._lock, self._conn:
+            self._conn.executemany(sql, rows)
+
     # ------------------------------------------------------------------
     # Maintenance
     # ------------------------------------------------------------------

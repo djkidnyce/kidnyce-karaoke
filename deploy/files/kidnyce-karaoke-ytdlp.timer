@@ -1,0 +1,11 @@
+# Written by deploy/install-pi.sh.
+[Unit]
+Description=Weekly yt-dlp update for Kid Nyce Karaoke
+
+[Timer]
+OnCalendar=Mon *-*-* 10:00:00
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

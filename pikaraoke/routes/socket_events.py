@@ -5,12 +5,36 @@ from collections.abc import Callable
 from functools import wraps
 
 from flask import request
+from flask_socketio import join_room
 
 from pikaraoke.lib.current_app import get_karaoke_instance, is_admin
+from pikaraoke.lib.guest_gate import caller_allowed, is_local_display, is_logged_in_host
 
 # Track connected splash screen clients and the elected master
 splash_connections = set()
 master_splash_id = None
+
+# Crowd screens follow the master's position but never play sound and are never
+# elected master, so a crowd screen that loads first cannot drive playback.
+crowd_connections = set()
+
+# Phones that joined with a code, so rotating the code can drop them at once.
+guest_sids = set()
+
+# The screens on the Pi itself. Join code changes go here and nowhere else.
+DISPLAY_ROOM = "displays"
+
+
+def kick_guests(socketio) -> None:
+    """Drop every guest socket and tell the screens to redraw the QR code.
+
+    Called when the join code rotates. The payload carries no code: the screens
+    fetch it themselves from an endpoint only the Pi can reach.
+    """
+    for sid in list(guest_sids):
+        socketio.server.disconnect(sid, namespace="/")
+    guest_sids.clear()
+    socketio.emit("join_code_changed", namespace="/", to=DISPLAY_ROOM)
 
 
 def _guard(handler: Callable) -> Callable:
@@ -52,6 +76,18 @@ def setup_socket_events(socketio):
 
         return register
 
+    @open_to_room("connect")
+    def handle_connect(auth=None) -> bool | None:
+        """Refuse a phone that has not joined, and file screens and guests apart."""
+        if not caller_allowed():
+            logging.info("Socket connection without a join code turned away")
+            return False
+        if is_local_display():
+            join_room(DISPLAY_ROOM)
+        elif not is_logged_in_host():
+            guest_sids.add(request.sid)
+        return None
+
     @open_to_room("end_song")
     def end_song(reason: str, playback_id: str | None = None) -> None:
         """Handle end_song WebSocket event from client.
@@ -80,10 +116,19 @@ def setup_socket_events(socketio):
         k.reset_now_playing_notification()
 
     @open_to_room("register_splash")
-    def register_splash() -> None:
-        """Handle splash screen registration and assign master/slave roles."""
+    def register_splash(role: str | None = None) -> None:
+        """Handle splash screen registration and assign master/slave roles.
+
+        Args:
+            role: "crowd" for the second screen, which only ever follows.
+        """
         global master_splash_id
         sid = request.sid
+        if role == "crowd":
+            crowd_connections.add(sid)
+            socketio.emit("splash_role", "slave", room=sid)
+            logging.info(f"Crowd screen registered: {sid}")
+            return
         splash_connections.add(sid)
         logging.info(f"Splash screen registered: {sid}")
 
@@ -115,6 +160,8 @@ def setup_socket_events(socketio):
         """Handle Socket.IO client disconnection and manage splash role handover."""
         global master_splash_id
         sid = request.sid
+        guest_sids.discard(sid)
+        crowd_connections.discard(sid)
         if sid in splash_connections:
             splash_connections.remove(sid)
             logging.info(f"Splash screen disconnected: {sid}")

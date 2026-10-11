@@ -1,0 +1,16 @@
+# Written by deploy/install-pi.sh.
+[Unit]
+Description=Kid Nyce Karaoke host firewall (nftables table inet kidnyce_fw)
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/kidnyce-karaoke/firewall.nft
+ExecStop=/usr/sbin/nft delete table inet kidnyce_fw
+
+[Install]
+WantedBy=multi-user.target

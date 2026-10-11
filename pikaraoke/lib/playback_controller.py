@@ -220,6 +220,10 @@ class PlaybackController:
         # Claim the playback before anything that yields to another greenlet, so
         # a second caller arriving mid-cleanup is rejected by the guard above.
         self.reset_now_playing()
+        # Emitted with the reset, before the cleanup below yields. The run loop
+        # sees a free player as soon as this greenlet sleeps, and anything that
+        # counts turns (break music) must have counted this one by then.
+        self.events.emit("song_ending", reason)
 
         if reason:
             logging.info(f"Reason: {reason}")

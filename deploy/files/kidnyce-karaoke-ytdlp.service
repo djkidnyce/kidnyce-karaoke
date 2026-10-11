@@ -1,0 +1,10 @@
+# Written by deploy/install-pi.sh. YouTube changes often and yt-dlp follows,
+# so this is the one dependency that is updated outside the hash pinned lock.
+[Unit]
+Description=Update yt-dlp for Kid Nyce Karaoke
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@@PREFIX@@/venv/bin/python -I -m pip install --quiet --disable-pip-version-check --upgrade --only-binary=:all: yt-dlp[default]

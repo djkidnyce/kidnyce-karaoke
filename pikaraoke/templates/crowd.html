@@ -1,0 +1,183 @@
+{% extends 'base.html' %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/subtitles-octopus.js') }}"></script>
+<script src="{{ url_for('static', filename='hls-1.6.15.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/intermission.js') }}"></script>
+<script>
+  const CrowdConfig = {
+    translations: {
+      // {# MSG: Count of extra queued songs not listed on the crowd screen. {count} is a number. #}
+      more: {{ _('+{count} more') | tojson }},
+      // {# MSG: Shown on the crowd screen when the queue is empty. #}
+      emptyQueue: {{ _('Nobody in line yet. Scan and grab the mic.') | tojson }},
+      // {# MSG: Label for the most requested song on the crowd screen. #}
+      topTonight: {{ _('Most requested tonight') | tojson }},
+      // {# MSG: Label for the most requested song of all time on the crowd screen. #}
+      topAllTime: {{ _('Most requested of all time') | tojson }}
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/crowd.js') }}"></script>
+{% endblock %} {% block body %}
+<div id="crowd">
+  <main id="stage">
+    <div id="stage-video-wrap">
+      <video id="crowd-video" muted playsinline disableRemotePlayback></video>
+    </div>
+
+    <div id="idle-panel" class="stage-panel">
+      <img class="idle-logo" src="{{ url_for('images.logo') }}" alt="logo" />
+      {# MSG: Big call to action on the crowd screen when nothing is playing. #}
+      <div class="idle-cta">{% trans %}Scan the code. Pick a song. Take the mic.{% endtrans %}</div>
+      <div id="idle-top" class="idle-top" style="display: none">
+        <div id="idle-top-label" class="idle-top-label"></div>
+        <div id="idle-top-title" class="idle-top-title"></div>
+      </div>
+    </div>
+
+    <div id="break-panel" class="stage-panel" style="display: none">
+      {# MSG: Big label on the crowd screen while break music plays. #}
+      <div class="break-label">{% trans %}Intermission{% endtrans %}</div>
+      <div id="break-countdown" class="break-countdown">0:00</div>
+      <div class="break-next">
+        {# MSG: Label before the next singer's name during a break. #}
+        {% trans %}Next singer:{% endtrans %} <b id="break-next-singer"></b>
+      </div>
+      <div id="break-next-song" class="break-song"></div>
+    </div>
+  </main>
+
+  <aside id="sidebar">
+    <section class="join-card">
+      <img id="crowd-qr" src="{{ url_for('images.qrcode') }}" alt="QR code" />
+      {# MSG: Label above the join code on the crowd screen. #}
+      <div class="join-label">{% trans %}Scan to join{% endtrans %}</div>
+      <div id="join-code" class="join-code"></div>
+      <div id="join-url" class="join-url">{{ url }}</div>
+    </section>
+
+    <section id="now-card" class="now-card" style="display: none">
+      {# MSG: Label for the current singer on the crowd screen. #}
+      <div class="section-label">{% trans %}Now singing{% endtrans %}</div>
+      <div id="now-singer" class="now-singer"></div>
+      <div id="now-song" class="now-song"></div>
+    </section>
+
+    <section class="queue-card">
+      {# MSG: Heading for the singing order on the crowd screen. #}
+      <div class="section-label">{% trans %}Up next{% endtrans %}</div>
+      <ol id="queue-list"></ol>
+      <div id="queue-more" class="queue-more"></div>
+    </section>
+
+    <div id="crowd-clock" class="crowd-clock"></div>
+  </aside>
+</div>
+
+<style>
+  html, body { overflow: hidden; background: #050508; height: 100%; }
+  #crowd {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-columns: 64fr 36fr;
+    color: #fff;
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  #stage { position: relative; background: #000; overflow: hidden; }
+  #stage-video-wrap { position: absolute; inset: 0; display: none; }
+  #crowd-video { width: 100%; height: 100%; object-fit: contain; }
+  .stage-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4vh 3vw;
+  }
+  #idle-panel { background: radial-gradient(ellipse at 30% 20%, #2b1055 0%, #050508 70%); }
+  .idle-logo { max-width: 30vw; max-height: 30vh; }
+  .idle-cta { font-size: 3.2vw; font-weight: 800; margin-top: 4vh; line-height: 1.15; }
+  .idle-top { margin-top: 5vh; }
+  .idle-top-label { font-size: 1.4vw; letter-spacing: 0.25em; text-transform: uppercase; opacity: 0.75; }
+  .idle-top-title { font-size: 2.4vw; font-weight: 700; color: #ffd166; }
+  #break-panel { background: radial-gradient(ellipse at center, #3a0f5c 0%, #050508 75%); }
+  .break-label { font-size: 3vw; letter-spacing: 0.35em; text-transform: uppercase; font-weight: 300; }
+  .break-countdown { font-size: 12vw; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+  .break-next { font-size: 2.6vw; }
+  .break-next b { color: #48c78e; }
+  .break-song { font-size: 1.8vw; opacity: 0.8; }
+
+  #sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 2vh;
+    padding: 3vh 2vw;
+    background: linear-gradient(180deg, #14141f 0%, #0a0a12 100%);
+    border-left: 2px solid #26263a;
+    min-width: 0;
+  }
+  .join-card { text-align: center; }
+  #crowd-qr {
+    width: min(22vw, 34vh);
+    height: min(22vw, 34vh);
+    image-rendering: pixelated;
+    background: #fff;
+    border-radius: 12px;
+    padding: 6px;
+  }
+  .join-label {
+    margin-top: 1vh;
+    font-size: 1.3vw;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    opacity: 0.8;
+  }
+  .join-code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 4.2vw;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: #ffd166;
+    line-height: 1.1;
+  }
+  .join-url { font-size: 1.2vw; opacity: 0.8; overflow-wrap: anywhere; }
+  .section-label {
+    font-size: 1.1vw;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    margin-bottom: 0.6vh;
+  }
+  .now-card { background: #1c2b22; border-radius: 12px; padding: 1.4vh 1.2vw; }
+  .now-singer { font-size: 2.2vw; font-weight: 800; color: #48c78e; overflow-wrap: anywhere; }
+  .now-song { font-size: 1.3vw; opacity: 0.9; overflow-wrap: anywhere; }
+  .queue-card { flex: 1; min-height: 0; overflow: hidden; }
+  #queue-list { list-style: none; margin: 0; padding: 0; counter-reset: q; }
+  #queue-list li {
+    counter-increment: q;
+    display: grid;
+    grid-template-columns: 2.2vw 1fr;
+    column-gap: 0.6vw;
+    padding: 0.7vh 0;
+    border-bottom: 1px solid #22223a;
+  }
+  #queue-list li::before {
+    content: counter(q);
+    grid-row: span 2;
+    font-size: 1.6vw;
+    font-weight: 800;
+    color: #8888aa;
+    text-align: right;
+  }
+  #queue-list li:first-child::before { color: #ffd166; }
+  #queue-list li.queue-empty { display: block; }
+  #queue-list li.queue-empty::before { content: none; }
+  .q-singer { font-size: 1.5vw; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q-song { font-size: 1.05vw; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queue-more { margin-top: 0.8vh; font-size: 1.1vw; opacity: 0.7; }
+  .queue-empty { font-size: 1.3vw; opacity: 0.7; }
+  .crowd-clock { text-align: right; font-size: 1.2vw; opacity: 0.6; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}

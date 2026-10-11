@@ -1,0 +1,15 @@
+# Written by deploy/install-pi.sh.
+[Unit]
+Description=Point the karaoke hostname at this Pi's LAN address
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kidnyce-karaoke-ddns
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=kidnyce-karaoke-ddns
+ReadWritePaths=/var/lib/kidnyce-karaoke-ddns

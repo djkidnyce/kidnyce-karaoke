@@ -47,6 +47,20 @@ EXPECTED_PUBLIC_ENDPOINTS = {
     "stream.stream_segment",
     "stream.stream_segment_m4s",
     "stream.stream_subtitle",
+    # Kid Nyce additions. The join flow must be open to reach it at all; the
+    # crowd screen endpoints check for the Pi or the host themselves; the join
+    # gate still stands in front of everything else here.
+    "charts.charts",
+    "charts.most_requested",
+    "charts.number_ones",
+    "display.crowd",
+    "display.state",
+    "intermission.track",
+    "join.healthz",
+    "join.join_api",
+    "join.join_form",
+    "join.join_page",
+    "join.join_with_code",
 }
 
 
