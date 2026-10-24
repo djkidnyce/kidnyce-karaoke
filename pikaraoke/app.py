@@ -32,6 +32,7 @@ from pikaraoke.lib.file_resolver import delete_tmp_dir
 from pikaraoke.lib.get_platform import get_platform, has_js_runtime, is_windows
 from pikaraoke.lib.guest_gate import install_guest_gate
 from pikaraoke.lib.login_throttle import LoginThrottle
+from pikaraoke.lib.security_checks import exposure_warning
 from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.url_prefix import BasePathMiddleware
 from pikaraoke.lib.youtube_dl import upgrade_youtubedl
@@ -356,6 +357,9 @@ def main() -> None:
         environ={"SERVER_NAME": k.ip},
     )
     server.start()
+    exposure = exposure_warning(args.bind_address, k.url)
+    if exposure:
+        logging.warning(exposure)
 
     # Handle sigterm, apparently cherrypy won't shut down without explicit handling
     # signal.signal(signal.SIGTERM, lambda signum, stack_frame: k.stop())

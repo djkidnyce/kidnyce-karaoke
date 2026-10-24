@@ -233,6 +233,8 @@ check "QR now carries the new code" bash -c "curl -fs http://127.0.0.1:$PORT/api
 echo "== Guessing the code (last, since it rate limits this machine's address)"
 codes=$(for _ in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -X POST -H 'Content-Type: application/json' -d '{"code":"ZZZZZZ"}' "$U/api/join"; done | sort | uniq -c | tr '\n' ' ')
 check "join guessing hits 429 ($codes)" grep -q 429 <<<"$codes"
+yt=$(for _ in $(seq 1 16); do curl -s -o /dev/null -w '%{http_code}\n' -b "$admin_jar" "${H[@]}" "$U/search"; done | sort | uniq -c | tr '\n' ' ')
+check "YouTube search is rate limited per phone ($yt)" grep -q 429 <<<"$yt"
 
 echo "== Renewal"
 # A real forced renewal against Pebble (a dry run would switch to Let's Encrypt
