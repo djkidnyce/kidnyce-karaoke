@@ -50,19 +50,25 @@ the karaoke screens.
 
 ## 3. Install
 
-Copy the release folder to the Pi (`scp -r kidnyce-karaoke pi@<pi-address>:`), then:
+Clone the repo on the Pi and run the installer:
 
 ```sh
-cd ~/kidnyce-karaoke
+sudo apt install -y git
+git clone https://github.com/djkidnyce/kidnyce-karaoke.git
+cd kidnyce-karaoke
 sudo ./deploy/install-pi.sh --cf-token-file ~/cloudflare.token
 ```
+
+A clone carries no prebuilt app, so the installer builds it first, with build tools
+pinned by hash in `deploy/build-requirements.lock`. The release tarball works the same
+way and skips that step: copy it to the Pi, unpack it, and run the same command inside.
 
 It takes about 10 minutes on a Pi 4. At the end it prints the admin password (once;
 `sudo kidnyce-karaoke password` shows it again) and the join code. Reboot once:
 `sudo reboot`. The screens come up on their own.
 
-Run the same command again any time to update. Songs, settings, play history, the
-certificate and the admin password are kept.
+Run the same command again any time to update (`git pull` first on a clone). Songs,
+settings, play history, the certificate and the admin password are kept.
 
 ### Useful options
 

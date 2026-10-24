@@ -252,14 +252,19 @@ kidnyce-karaoke screens swap off >/dev/null
 
 check "nftables table loads and unloads" bash -c "nft -f /etc/kidnyce-karaoke/firewall.nft && nft list table inet kidnyce_fw >/dev/null && nft delete table inet kidnyce_fw"
 
-echo "== Idempotent re-run"
+echo "== Idempotent re-run, from a git clone (no prebuilt wheel)"
+# The tracked files as a clone has them: no dist/, so the installer builds the wheel.
+CLONE="$WORK/clone"
+mkdir -p "$CLONE"
+git -C "$ROOT" ls-files -co --exclude-standard | grep -v '^dist/' | (cd "$ROOT" && tar cf - -T -) | tar xf - -C "$CLONE"
 check "second install run succeeds and keeps the password" bash -c "
-    '$ROOT/deploy/install-pi.sh' --yes --skip-hw-check --no-kiosk --no-ddns --dns-provider hook \
+    '$CLONE/deploy/install-pi.sh' --yes --skip-hw-check --no-kiosk --no-ddns --dns-provider hook \
         --dns-auth-hook '$WORK/auth-hook' --dns-cleanup-hook '$WORK/cleanup-hook' \
         --acme-server https://127.0.0.1:14000/dir --acme-ca-bundle '$ACME_CA' \
         --screens dual \
         3>/dev/null >'$WORK/install2.out' 2>&1 && test \"\$(cat /etc/kidnyce-karaoke/admin-password)\" = '$PW'"
 check "installer --screens dual reaches the app" bash -c "kidnyce-karaoke screens | grep -q 'Setup:  dual'"
+check "a git clone builds and installs the app wheel" bash -c "grep -q 'built pikaraoke-' '$WORK/install2.out' && test -f '$CLONE'/dist/pikaraoke-*.whl"
 kidnyce-karaoke screens auto >/dev/null
 
 echo "== Screens on Xorg with virtual outputs"

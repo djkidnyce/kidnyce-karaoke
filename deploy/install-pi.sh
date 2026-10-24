@@ -267,7 +267,7 @@ preflight() {
     fi
 
     local model mem_kb mem_gb
-    model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo "not a Raspberry Pi")
+    model=$({ tr -d '\0' </proc/device-tree/model; } 2>/dev/null || echo "unknown computer")
     mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
     mem_gb=$(awk -v k="$mem_kb" 'BEGIN {printf "%.1f", k / 1048576}')
     info "Hardware: $model, ${mem_gb} GB RAM"
@@ -309,14 +309,49 @@ preflight() {
         [[ -x $DNS_AUTH_HOOK ]] || die "--dns-provider hook needs an executable --dns-auth-hook"
     fi
 
-    WHEEL=$(find "$SRC_ROOT/dist" -maxdepth 1 -name 'pikaraoke-*.whl' 2>/dev/null | sort | tail -n 1)
-    [[ -n $WHEEL ]] || die "no app wheel in $SRC_ROOT/dist. Use the release bundle, or build one with: uv build --wheel"
     [[ -f $SCRIPT_DIR/requirements.lock ]] || die "missing $SCRIPT_DIR/requirements.lock"
-    if [[ -f $SRC_ROOT/dist/SHA256SUMS ]]; then
-        (cd "$SRC_ROOT/dist" && sha256sum --quiet --check --ignore-missing SHA256SUMS) || die "app wheel checksum mismatch"
-        ok "app wheel checksum verified"
+    WHEEL=$(find "$SRC_ROOT/dist" -maxdepth 1 -name "pikaraoke-$APP_VERSION-*.whl" 2>/dev/null | sort | tail -n 1 || true)
+    if [[ -n $WHEEL ]]; then
+        if [[ -f $SRC_ROOT/dist/SHA256SUMS ]]; then
+            (cd "$SRC_ROOT/dist" && sha256sum --quiet --check --ignore-missing SHA256SUMS) || die "app wheel checksum mismatch"
+            ok "app wheel checksum verified"
+        fi
+        info "Installing $(basename "$WHEEL") for https://$DOMAIN"
+    elif [[ -f $SRC_ROOT/pyproject.toml && -f $SCRIPT_DIR/build-requirements.lock ]]; then
+        # A git clone: no prebuilt wheel, so it is built here from this checkout.
+        BUILD_FROM_SOURCE=1
+        info "Installing pikaraoke $APP_VERSION from this source checkout for https://$DOMAIN"
+    else
+        die "no app wheel in $SRC_ROOT/dist and no source to build one. Use the release tarball or a git clone."
     fi
-    info "Installing $(basename "$WHEEL") for https://$DOMAIN"
+}
+
+# A git clone carries the source, not the wheel. Build it with hash pinned
+# tools in a throwaway venv, the same way the release wheel is built.
+BUILD_FROM_SOURCE=0
+build_wheel_from_source() {
+    ((BUILD_FROM_SOURCE)) || return 0
+    step "Building the app from source"
+    if ((DRY_RUN)); then
+        WHEEL="$SRC_ROOT/dist/pikaraoke-$APP_VERSION-py3-none-any.whl"
+        info "[dry run] would build $WHEEL"
+        return
+    fi
+    local build
+    build=$(mktemp -d)
+    python3 -m venv "$build/venv"
+    "$build/venv/bin/python" -I -m pip install --quiet --disable-pip-version-check \
+        --require-hashes --only-binary=:all: -r "$SCRIPT_DIR/build-requirements.lock"
+    "$build/venv/bin/python" -I -m pip wheel --quiet --disable-pip-version-check \
+        --no-deps --no-build-isolation --wheel-dir "$build/dist" "$SRC_ROOT" ||
+        die "the app did not build from $SRC_ROOT (see $LOG_FILE)"
+    install -d -m 755 "$SRC_ROOT/dist"
+    WHEEL=$(find "$build/dist" -maxdepth 1 -name "pikaraoke-$APP_VERSION-*.whl" | head -n 1)
+    [[ -n $WHEEL ]] || die "the build made no pikaraoke $APP_VERSION wheel"
+    install -m 644 "$WHEEL" "$SRC_ROOT/dist/"
+    WHEEL="$SRC_ROOT/dist/$(basename "$WHEEL")"
+    rm -rf "$build"
+    ok "built $(basename "$WHEEL")"
 }
 
 # ---------------------------------------------------------------- secrets
@@ -819,6 +854,7 @@ main() {
     install_packages
     create_users_and_dirs
     install_deno
+    build_wheel_from_source
     install_app
     obtain_certificate
     configure_app

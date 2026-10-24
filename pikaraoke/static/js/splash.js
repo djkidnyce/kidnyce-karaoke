@@ -441,8 +441,13 @@ const handleNowPlayingUpdate = (np) => {
   }
 }
 
-// Break music between singers. Only the master plays it, so two screens never
-// double the audio. Every screen shows the countdown.
+// Break music between singers. One screen plays it, so two never double the
+// audio: the kiosk's sound screen (?singer=1 or ?all=1), or on a plain splash
+// the master. The master is elected by a playing video's beacon, and nothing
+// plays during a break, so the kiosk screens do not wait for that seat.
+// Every screen shows the countdown.
+const playsBreakMusic = () => isSingerScreen || isAllInOne || isMaster;
+
 const applyIntermission = (np) => {
   const brk = np.intermission;
   const active = Boolean(brk && !brk.pending && brk.tracks && brk.tracks.length);
@@ -454,7 +459,7 @@ const applyIntermission = (np) => {
     $("#intermission-overlay").fadeOut();
   }
   intermissionCountdown.sync(active ? brk : null);
-  if (isMaster && autoplayConfirmed && active) {
+  if (playsBreakMusic() && autoplayConfirmed && active) {
     getIntermissionPlayer().sync(brk);
   } else if (intermissionPlayer) {
     // Nothing to stop until a break has played here.

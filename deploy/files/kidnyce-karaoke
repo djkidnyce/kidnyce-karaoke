@@ -139,7 +139,7 @@ cmd_doctor() {
     local failures=0 lan resolved days model throttled
     echo "Checking Kid Nyce Karaoke"
 
-    model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo unknown)
+    model=$({ tr -d '\0' </proc/device-tree/model; } 2>/dev/null || echo unknown)
     echo "  Device: $model, $(awk '/MemTotal/ {printf "%.1f GB RAM", $2 / 1048576}' /proc/meminfo)"
 
     for unit in kidnyce-karaoke nginx; do

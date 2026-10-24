@@ -251,7 +251,7 @@ with sync_playwright() as p:
     )
     phone.screenshot(path=str(OUT_DIR / "phone-charts.png"), full_page=False)
 
-    for path in ("/queue", "/search", "/browse", "/rankings", "/info"):
+    for path in ("/queue", "/search", "/browse", "/rankings", "/info", "/settings", "/charts"):
         phone.goto(f"{SITE}{path}")
         phone.wait_for_load_state("networkidle")
     admin_page = admin_ctx.new_page()
@@ -260,7 +260,7 @@ with sync_playwright() as p:
     check(
         "host panel shows the join code", admin_page.inner_text("#host-join-code").strip() == CODE
     )
-    admin_page.goto(f"{SITE}/info")
+    admin_page.goto(f"{SITE}/settings")
     admin_page.wait_for_load_state("networkidle")
     check(
         "Settings, Screens names the board",
