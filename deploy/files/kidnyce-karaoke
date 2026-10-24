@@ -116,21 +116,23 @@ cmd_screens() {
             else "The screens are not running." end)'
 }
 
+# Days left on the certificate Nginx is serving. Read from the live connection,
+# not the file: /etc/letsencrypt/live is root only, and doctor runs without sudo.
 cert_days_left() {
-    local cert=$1 end
-    end=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2) || return 1
+    local end
+    end=$(openssl s_client -connect 127.0.0.1:443 -servername "$DOMAIN" </dev/null 2>/dev/null |
+        openssl x509 -enddate -noout 2>/dev/null | cut -d= -f2 || true)
+    [[ -n $end ]] || return 1
     echo $((($(date -d "$end" +%s) - $(date +%s)) / 86400))
 }
 
 cmd_status() {
-    local unit
+    local unit days
     echo "Kid Nyce Karaoke  https://$DOMAIN"
     for unit in kidnyce-karaoke nginx kidnyce-karaoke-firewall; do
         if systemctl is-active --quiet "$unit"; then ok "$unit running"; else bad "$unit not running"; fi
     done
-    if [[ -f $CERT ]]; then
-        ok "certificate valid for $(cert_days_left "$CERT") more days"
-    fi
+    if days=$(cert_days_left); then ok "certificate valid for $days more days"; fi
     echo "  LAN address: $(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
     cmd_code 2>/dev/null || warn "app not answering yet"
 }
@@ -156,11 +158,10 @@ cmd_doctor() {
         bad "HTTPS through Nginx failed"; failures=$((failures + 1))
     fi
 
-    if [[ -f $CERT ]]; then
-        days=$(cert_days_left "$CERT")
+    if days=$(cert_days_left); then
         if ((days > 14)); then ok "certificate: $days days left"; else warn "certificate: only $days days left, check: sudo certbot renew --dry-run"; fi
     else
-        bad "no certificate at $CERT"; failures=$((failures + 1))
+        bad "could not read the certificate Nginx serves on 443"; failures=$((failures + 1))
     fi
 
     lan=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
