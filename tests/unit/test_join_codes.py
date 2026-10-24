@@ -99,6 +99,20 @@ def test_a_new_night_gets_a_code_the_first_song_keeps(db, events, history, codes
     assert codes.code == tonight
 
 
+def test_a_fresh_start_issues_a_new_code(db, events, codes):
+    before = codes.code
+    heard = []
+    events.on("join_code_changed", lambda: heard.append(True))
+    again = JoinCodeManager(db, events, lambda: None, fresh=True)
+    assert again.code != before
+    assert heard == [True]
+
+
+def test_without_fresh_a_restart_keeps_the_code(db, events, codes):
+    before = codes.code
+    assert JoinCodeManager(db, events, lambda: None, fresh=False).code == before
+
+
 def test_renaming_the_session_keeps_the_code(codes, history):
     uuid = history.start_session("Friday")
     code = codes.code

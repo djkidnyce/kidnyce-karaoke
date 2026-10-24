@@ -400,6 +400,27 @@
 
 			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
 				<div>
+					{# MSG: Header of the settings section for the code guests type or scan to join. #}
+					<h3 class="m-0">{% trans %}Join code{% endtrans %}</h3>
+					{# MSG: One-line summary under the Join code heading. #}
+					<span class="section-summary is-size-7 has-text-grey-light">{% trans %}When guests get a new code{% endtrans %}</span>
+				</div>
+			</header>
+			<div class="collapsible-content panel is-shadowless mb-0">
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>
+						{# MSG: Checkbox that issues a new join code every time the app starts. #} {% trans %}New code every time the Pi starts{% endtrans %}
+						{# MSG: Explains when the join code changes. #}
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}Starting or ending a session always gives a new code. New code on the home page, under Hosting, changes it any time.{% endtrans %}</span>
+					</span>
+					<input id="pref-new-join-code-on-start" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="new_join_code_on_start" {% if new_join_code_on_start == True %}checked{% endif %}>
+				</label>
+			</div>
+
+			<hr class="my-0">
+
+			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
+				<div>
 					{# MSG: Header of the settings section for the TVs plugged into the Pi. #}
 					<h3 class="m-0">{% trans %}Screens{% endtrans %}</h3>
 					{# MSG: One-line summary under the Screens heading, naming the controls inside it. #}

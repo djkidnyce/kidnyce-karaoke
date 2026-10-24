@@ -358,7 +358,12 @@ class Karaoke:
         # guests scan a code the first song keeps rather than replaces.
         self.play_history.end_stale_session()
         self._next_stale_check = time.monotonic() + STALE_CHECK_SECONDS
-        self.join_codes = JoinCodeManager(self.db, self.events, self.current_session_uuid)
+        self.join_codes = JoinCodeManager(
+            self.db,
+            self.events,
+            self.current_session_uuid,
+            fresh=self.preferences.get_or_default("new_join_code_on_start"),
+        )
         self.events.on("join_code_changed", self.generate_qr_code)
         self.generate_qr_code()
 

@@ -27,7 +27,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.2.0"
-APP_VERSION="1.23.0+kidnyce.5"
+APP_VERSION="1.23.0+kidnyce.6"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -57,6 +57,7 @@ SCREENS=""
 SWAP_SCREENS=0
 DISPLAY_MODE="1920x1080"
 AUDIO_OUT="hdmi-singer"
+AUDIO_SET=0
 FORCE_HDMI=0
 FIREWALL=1
 DDNS=1
@@ -149,7 +150,7 @@ while [[ $# -gt 0 ]]; do
         --screens) SCREENS=$2; shift ;;
         --swap-screens) SWAP_SCREENS=1 ;;
         --display-mode) DISPLAY_MODE=$2; shift ;;
-        --audio) AUDIO_OUT=$2; shift ;;
+        --audio) AUDIO_OUT=$2; AUDIO_SET=1; shift ;;
         --force-hdmi) FORCE_HDMI=1 ;;
         --no-firewall) FIREWALL=0 ;;
         --no-ddns) DDNS=0 ;;
@@ -711,6 +712,12 @@ configure_kiosk() {
 
     run install -m 755 -o root -g root "$SCRIPT_DIR/kiosk/kiosk-session.sh" "$PREFIX/kiosk/kiosk-session.sh"
     render "$SCRIPT_DIR/kiosk/bash_profile" | write_file 644 "$KIOSK_USER:$KIOSK_USER" "$home/.bash_profile"
+    # A rerun keeps the sound output chosen earlier (kidnyce-karaoke audio) unless --audio is given.
+    if ((!AUDIO_SET)) && [[ -f $ETC_DIR/kiosk.env ]]; then
+        local kept
+        kept=$(sed -n 's/^AUDIO_OUT=//p' "$ETC_DIR/kiosk.env")
+        [[ -n $kept ]] && AUDIO_OUT=$kept
+    fi
     write_file 644 root:root "$ETC_DIR/kiosk.env" <<EOF
 # Written by deploy/install-pi.sh. Change and run: sudo kidnyce-karaoke restart screens
 # One screen or two, which port, and swapping them: Settings, Screens, or
@@ -722,6 +729,8 @@ DISPLAY_MODE=$DISPLAY_MODE
 AUDIO_OUT=$AUDIO_OUT
 EOF
     render "$SCRIPT_DIR/files/kiosk-autologin.conf" | write_file 644 root:root /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
+    # Undo desktop mode (kidnyce-karaoke mode desktop) left from before this run.
+    run rm -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf.off
 
     # The screens need the console, not a desktop session.
     if has_systemd && systemctl is-enabled display-manager.service >/dev/null 2>&1; then

@@ -46,12 +46,16 @@ class JoinCodeManager:
         db: KaraokeDatabase,
         events: EventSystem,
         get_session_uuid: Callable[[], str | None],
+        fresh: bool = False,
     ) -> None:
+        """fresh issues a new code at once, so every start of the app is a new night."""
         self._db = db
         self._events = events
         self._get_session_uuid = get_session_uuid
         self._lock = threading.Lock()
         self._reconcile()
+        if fresh:
+            self.rotate()
         events.on("session_changed", self._reconcile)
 
     @property

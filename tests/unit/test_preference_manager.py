@@ -304,6 +304,7 @@ def test_preference_manager_defaults_exist():
         "screen_mode",
         "single_screen_output",
         "swap_screens",
+        "new_join_code_on_start",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

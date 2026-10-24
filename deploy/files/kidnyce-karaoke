@@ -11,6 +11,10 @@
 #   kidnyce-karaoke screens auto|single|dual   one screen for everything, or two
 #   kidnyce-karaoke screens port NAME|auto     port for one screen, such as HDMI-2
 #   kidnyce-karaoke screens swap on|off        swap the singer and room screens
+#   kidnyce-karaoke code-on-boot on|off        new join code every time the Pi starts
+#   kidnyce-karaoke audio [OUT]     show or set where the player's sound goes
+#   kidnyce-karaoke wifi            join a venue's WiFi from the console
+#   kidnyce-karaoke mode desktop|karaoke       switch to the desktop and back (reboots)
 #   kidnyce-karaoke logs [app|nginx|screens|ddns]
 #   kidnyce-karaoke restart [app|screens|all]
 #   kidnyce-karaoke update-ytdlp    pull the newest yt-dlp now
@@ -118,6 +122,82 @@ cmd_screens() {
 
 # Days left on the certificate Nginx is serving. Read from the live connection,
 # not the file: /etc/letsencrypt/live is root only, and doctor runs without sudo.
+cmd_code_on_boot() {
+    need_root code-on-boot
+    case "${1:-}" in
+        on) set_pref new_join_code_on_start True; echo "A new join code at every start." ;;
+        off) set_pref new_join_code_on_start False; echo "The join code now only changes with the session or: sudo kidnyce-karaoke new-code" ;;
+        *) echo "Usage: kidnyce-karaoke code-on-boot on|off" >&2; exit 1 ;;
+    esac
+}
+
+# The player's sound skips PipeWire and the desktop volume control: the screen
+# session hands Chromium an ALSA device, chosen by AUDIO_OUT in kiosk.env.
+cmd_audio() {
+    local env=$ETC_DIR/kiosk.env current
+    current=$(sed -n 's/^AUDIO_OUT=//p' "$env" 2>/dev/null)
+    if [[ -z ${1:-} ]]; then
+        echo "Player sound: ${current:-hdmi-singer}"
+        echo "Choices: hdmi-singer (singer TV, or the one screen), hdmi-crowd, headphones (3.5 mm jack), usb, or an ALSA PCM"
+        echo "Sound devices:"
+        aplay -l 2>/dev/null | awk '/^card/ {print "  " $0}'
+        echo "Volume for a USB interface: alsamixer -c <card name from the list>"
+        return
+    fi
+    need_root audio
+    [[ $1 =~ ^[A-Za-z0-9:=,_.-]+$ ]] || { echo "Not a valid output: $1" >&2; exit 1; }
+    if grep -q '^AUDIO_OUT=' "$env"; then
+        sed -i "s|^AUDIO_OUT=.*|AUDIO_OUT=$1|" "$env"
+    else
+        echo "AUDIO_OUT=$1" >>"$env"
+    fi
+    pkill -u "$KIOSK_USER" -f kiosk-session.sh || true
+    echo "Player sound set to $1. The screens restart in a few seconds."
+}
+
+cmd_wifi() {
+    need_root wifi
+    command -v nmtui >/dev/null || { echo "NetworkManager is not installed." >&2; exit 1; }
+    nmtui connect
+    sleep 3
+    echo "LAN address: $(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
+    if [[ -x /usr/local/sbin/kidnyce-karaoke-ddns ]]; then
+        /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record updated: phones can use https://$DOMAIN"
+    fi
+}
+
+# Desktop mode turns the Raspberry Pi OS desktop back on and stops the screens
+# from taking over tty1; karaoke mode undoes it. The app keeps running in both.
+cmd_mode() {
+    need_root mode
+    local dropin=/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
+    case "${1:-}" in
+        desktop)
+            systemctl cat display-manager.service >/dev/null 2>&1 ||
+                { echo "No desktop is installed (Raspberry Pi OS Lite). For WiFi use: sudo kidnyce-karaoke wifi" >&2; exit 1; }
+            if [[ -f $dropin ]]; then mv -f "$dropin" "$dropin.off"; fi
+            systemctl daemon-reload
+            systemctl enable display-manager.service >/dev/null 2>&1
+            systemctl set-default graphical.target >/dev/null
+            echo "Desktop mode set. Rebooting in 5 seconds. Back to the screens: sudo kidnyce-karaoke mode karaoke"
+            ;;
+        karaoke)
+            if [[ -f $dropin.off ]]; then mv -f "$dropin.off" "$dropin"; fi
+            systemctl daemon-reload
+            systemctl disable display-manager.service >/dev/null 2>&1 || true
+            systemctl set-default multi-user.target >/dev/null
+            echo "Karaoke mode set. Rebooting in 5 seconds."
+            ;;
+        *)
+            if [[ -f $dropin ]]; then echo "Mode: karaoke"; else echo "Mode: desktop"; fi
+            echo "Usage: sudo kidnyce-karaoke mode desktop|karaoke"
+            return
+            ;;
+    esac
+    sleep 5
+    systemctl reboot
+}
+
 cert_days_left() {
     local end
     end=$(openssl s_client -connect 127.0.0.1:443 -servername "$DOMAIN" </dev/null 2>/dev/null |
@@ -228,10 +308,14 @@ case "${1:-status}" in
     set-password) cmd_set_password ;;
     doctor) cmd_doctor ;;
     screens) cmd_screens "${2:-show}" "${3:-}" ;;
+    code-on-boot) cmd_code_on_boot "${2:-}" ;;
+    audio) cmd_audio "${2:-}" ;;
+    wifi) cmd_wifi ;;
+    mode) cmd_mode "${2:-}" ;;
     logs) cmd_logs "${2:-app}" ;;
     restart) cmd_restart "${2:-all}" ;;
     update-ytdlp) need_root update-ytdlp; systemctl start kidnyce-karaoke-ytdlp; "$PREFIX/venv/bin/python" -I -m yt_dlp --version ;;
     ddns) need_root ddns; /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record checked." ;;
-    -h | --help | help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+    -h | --help | help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) echo "Unknown command: $1 (try: kidnyce-karaoke help)" >&2; exit 1 ;;
 esac

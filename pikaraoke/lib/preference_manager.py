@@ -67,6 +67,8 @@ class PreferenceManager:
         "screen_mode": "auto",
         "single_screen_output": "auto",
         "swap_screens": False,
+        # A new join code every time the app starts (each boot of the Pi)
+        "new_join_code_on_start": True,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:
