@@ -12,11 +12,11 @@
   <script src="{{  url_for('static', filename='js.cookie-3.0.5.min.js') }}"></script>
   <script src="{{  url_for('static', filename='socket.io-4.8.3.min.js') }}"></script>
   <script src="{{  url_for('static', filename='spa-navigation.js') }}"></script>
+  <link rel="stylesheet" href="{{  url_for('static', filename='fonts/lato/lato.css') }}">
   <link rel="stylesheet" href="{{  url_for('static', filename='bulma.min.css') }}">
-  <link rel="stylesheet" href="{{  url_for('static', filename='bulma-dark.css') }}">
   <link rel="stylesheet" href="{{  url_for('static', filename='custom.css') }}">
   <link rel="icon" type="image/png" href="{{  url_for('static', filename='images/microphone.png') }}">
-  <link rel="stylesheet" href="{{  url_for('static', filename='fontello/css/fontello.css') }}?v=2">
+  <link rel="stylesheet" href="{{  url_for('static', filename='fontello/css/fontello.css') }}?v=4">
 
   <script>
     window.pikaraokeConfig = {
@@ -33,8 +33,12 @@
     // translation must therefore be filtered by hand: |tojson for a JS value (as below),
     // |forceescape for HTML that JS builds as a string. See tests/unit/test_template_i18n.py.
     window.translations = {
-      // {# MSG: Prompt to change the username displayed next to queued songs. {name} is replaced with the name #}
-      promptChangeUsername: {{ _('Do you want to change the name of the person using this device? This will show up on queued songs. Current: {name}') | tojson }},
+      // {# MSG: Title of the dialog holding the singer's name and, later, their other preferences. #}
+      identityTitle: {{ _('Profile') | tojson }},
+      // {# MSG: Label on the name field in the profile dialog. #}
+      usernameLabel: {{ _('Username') | tojson }},
+      // {# MSG: Hint under the username field noting the name is public. #}
+      usernameHelp: {{ _('This name is visible to everyone.') | tojson }},
       // {# MSG: Confirmation prompt to clear entire queue. User must type ok to confirm #}
       promptClearQueue: {{ _('Are you sure you want to clear the ENTIRE queue? Type ok to continue') | tojson }},
       // {# MSG: Confirmation dialog when permanently deleting a song file from the library #}
@@ -52,15 +56,6 @@
       // {# MSG: Generic error prefix shown before an error message. #}
       errorLabel: {{ _("Error") | tojson }}
     };
-
-    function generateRandomString(length) {
-      const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let result = '';
-      for (let i = 0; i < length; i++) {
-        result += characters.charAt(Math.floor(Math.random() * characters.length));
-      }
-      return result;
-    }
 
     function getSemitonesLabel(value) {
       var display = value > 0 ? "+" + value : String(value);
@@ -92,6 +87,11 @@
     }
 
     function connectSocket() {
+      // io() once per tab: the SPA re-runs this script, and a second socket
+      // leaks the first (still connected, still firing its listeners).
+      if (window.socket) {
+        return;
+      }
       window.socket = io({ path: window.pikaraokeConfig.socketioPath });
       window.socket.on('connect', function() {
           console.log('Socket connected');
@@ -102,49 +102,77 @@
     }
 
 
-    function showNotification(message, categoryClass, timeout=3000) {
-      $("#notification-alt").addClass(categoryClass)
-      $("#notification-alt div").text(message)
-      $("#notification-alt").fadeIn()
-      setTimeout(function () {$("#notification-alt").fadeOut()}, timeout)
-      setTimeout(function () {$("#notification-alt").removeClass(categoryClass)}, timeout + 750)
+    // Each toast owns its timer, so a later toast never cuts an earlier one
+    // short and a manual close cannot race the auto-expiry.
+    function bindToastDismiss($toast, timeout) {
+      function dismiss() {
+        clearTimeout(timer);
+        $toast.fadeOut(function () { $toast.remove(); });
+      }
+      var timer = setTimeout(dismiss, timeout);
+      $toast.find(".delete").on("click", dismiss);
     }
 
-    function setUserCookie(reload=false) {
-      var user = Cookies.get("user");
-      if (!user) {
-        let name = window.prompt(
-          // {# MSG: Prompt which asks the user their name when they first try to add to the queue. #}
-          {{ _('Please enter your name. This will show up next to the songs you queue up from this device.') | tojson }}
-        );
-        if (name) {
-          Cookies.set("user", name, { expires: 3650, path: window.pikaraokeConfig.cookiePath });
-        }
-        else {
-          Cookies.set("user", `Anon-${generateRandomString(4)}`, { expires: 3650 });
-        }
-        reload && location.reload();
+    // Shared by the management stack and the splash; they differ only in the
+    // target stack and whether the toast carries a close button.
+    window.addToast = function ($stack, message, categoryClass, { timeout = 3000, closeable = true } = {}) {
+      var $toast = $('<div class="notification mb-0"></div>')
+        .addClass(categoryClass);
+      if (closeable) {
+        // base-notification pads the text clear of the close button, so it
+        // belongs only on toasts that carry one.
+        $toast.addClass('base-notification')
+          .append($('<button class="delete" aria-label="close"></button>'));
       }
+      $toast.append($('<div class="flash"></div>').text(message));
+      $stack.append($toast);
+      $toast.hide().fadeIn();
+      bindToastDismiss($toast, timeout);
+      return $toast;
+    }
+
+    // Global: templates and spa-navigation.js both fire it.
+    window.showNotification = function (message, categoryClass, timeout = 3000) {
+      window.addToast($("#notification-stack"), message, categoryClass, { timeout });
     }
 
     function getUserCookie() {
       return Cookies.get("user");
     }
 
-    // Who a queue add is attributed to. In KJ mode the visible singer field
-    // names who the host is queuing for; left blank (or hidden outside KJ mode)
-    // it falls back to this device's own cookie name, prompting for one the
-    // first time it is needed. Every page that queues a song resolves it here,
-    // so the fallback rule cannot drift between them.
+    // Shows the device's name in the navbar item, clearing the "Join in" state.
+    window.setCurrentUser = function (name) {
+      $("#current-user .is-truncated").text(name);
+      $("#current-user").attr({ title: name, "aria-label": name }).removeClass("has-text-success");
+    };
+
+    // Who a queue add is attributed to, resolved async so the name can come from
+    // a modal: the KJ singer field, else this device's cookie, else the Join in
+    // dialog (which writes the cookie). Rejects on dismissal, so nothing queues.
     function resolveSinger() {
-      // The field is absent for non-admins, so val() can be undefined. Trimmed
-      // because a stray space would otherwise be stored as a performer name.
+      var d = $.Deferred();
+      // Non-admins have no field; trim guards a stray space stored as a name.
       var singer = ($("#singer-name").val() || "").trim();
       if (singer) {
-        return singer;
+        return d.resolve(singer);
       }
-      setUserCookie();
-      return getUserCookie() || "";
+      var user = getUserCookie();
+      if (user) {
+        return d.resolve(user);
+      }
+      window.promptForIdentity({
+        title: window.translations.identityTitle,
+        label: window.translations.usernameLabel,
+        help: window.translations.usernameHelp,
+        value: ""
+      }).done(function (res) {
+        Cookies.set("user", res.name, { expires: 3650, path: window.pikaraokeConfig.cookiePath });
+        window.setCurrentUser(res.name);
+        d.resolve(res.name);
+      }).fail(function () {
+        d.reject();
+      });
+      return d;
     }
 
     // KJ mode is opt-in for a host queuing on behalf of singers. It is not the
@@ -284,14 +312,13 @@
         // The attribute holds the percent-encoded path the href used to carry,
         // and the body is assembled by hand to pass it through untouched: a
         // filename that is not valid UTF-8 cannot survive a decode here.
-        var body =
-          "song_to_add=" +
-          this.getAttribute("data-song") +
-          "&song_added_by=" +
-          encodeURIComponent(resolveSinger());
-        $.post(window.pikaraokeConfig.enqueueUrl, body, function (data) {
-          // {# MSG: Notification shown after trying to add a song to the queue. The song name comes after this string. #}
-          showNotification(data.success[1], data.success[0] ? "is-success" : "is-danger");
+        var dataSong = this.getAttribute("data-song");
+        resolveSinger().done(function (name) {
+          var body = "song_to_add=" + dataSong + "&song_added_by=" + encodeURIComponent(name);
+          $.post(window.pikaraokeConfig.enqueueUrl, body, function (data) {
+            // {# MSG: Notification shown after trying to add a song to the queue. The song name comes after this string. #}
+            showNotification(data.success[1], data.success[0] ? "is-success" : "is-danger");
+          });
         });
       });
     }
@@ -304,17 +331,14 @@
       // in the room sees which session is running.
       bindSessionRibbon();
 
-      $("#notification-close").click(function () {
-        $(".notification").hide();
+      // Give server flashes the same close button and auto-expiry as fired toasts.
+      $("#notification-stack .notification").each(function () {
+        bindToastDismiss($(this), 3000);
       });
-      $("#notification-alt").hide()
 
       // Navbar burger menu is handled by spa-navigation.js
 
       window.spaNavigation.updateNavHighlight(window.location.pathname);
-
-      // handle auto-close flash notifications
-      setTimeout(function() { $("#notification").fadeOut()}, 3000);
 
       // Reveal KJ-only controls when a host has opted into KJ mode.
       if (isKjMode()) {
@@ -322,13 +346,12 @@
         bindSingerFieldToSession();
       }
 
-      // handle current user display
-      var currentUser = Cookies.get("user");
-
+      // Reflect this device's saved name, if any. With none the server-rendered
+      // "Join in" state stands until the guest names themselves.
+      var currentUser = getUserCookie();
       if (currentUser) {
-        $("#current-user span").text(currentUser)
-        $("#current-user").removeClass("is-hidden");
-      };
+        window.setCurrentUser(currentUser);
+      }
 
       // Username change handler is now in spa-navigation.js
 
@@ -352,19 +375,26 @@
   .navbar-link > i::before {
     margin-right: 0;
   }
-  .base-notification {
+  /* The stack is the fixed anchor; toasts flow upward from the bottom edge,
+     newest nearest it. pointer-events lets clicks through the gaps between toasts. */
+  .notification-stack {
     position: fixed;
     width: 500px;
     bottom: 5px;
     left: 50%;
     margin-left: -250px;
     z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
   }
-  .current-user {
-    position: fixed;
-    padding: 3px;
-    bottom: 5px;
-    right: 10px;
+  .notification-stack .notification {
+    pointer-events: auto;
+  }
+  /* Padded to level the first line with Bulma's close button, 1rem from the top. */
+  .base-notification {
+    --bulma-notification-padding: 0.875em 1.5em;
   }
   .session-ribbon {
     display: flex;
@@ -376,54 +406,45 @@
        every other block on the page. */
     margin: 4px 0 0;
     padding: 4px 12px;
-    border-radius: 6px;
-    background-color: rgba(255, 255, 255, 0.04);
-    color: hsl(0, 0%, 71%);
+    border-radius: var(--bulma-radius);
+    background-color: var(--bulma-dark);
+    color: var(--bulma-grey-light);
     font-size: 0.72rem;
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-  }
-  .session-ribbon-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .session-ribbon-dot {
     flex: none;
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background-color: hsl(141, 53%, 53%);
+    background-color: var(--bulma-success);
     animation: session-ribbon-pulse 2s ease-in-out infinite;
   }
   @keyframes session-ribbon-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(72, 199, 116, 0.5); }
-    50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(72, 199, 116, 0); }
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--bulma-success) 50%, transparent); }
+    50% { opacity: 0.55; box-shadow: 0 0 0 4px transparent; }
   }
   @media (prefers-reduced-motion: reduce) {
     .session-ribbon-dot { animation: none; }
   }
-  tr:nth-child(even) {
-    background-color: rgb(50, 55, 55);
-  }
   @media screen and (max-width: 1088px) {
-    .navbar-brand > .navbar-item > span {
+    /* Labels hide at this width; the avatar slot is the item's only signal. */
+    .navbar-brand > .navbar-item > span:not(.singer-avatar) {
       display: none;
     }
-    .base-notification {
-      position: fixed;
+    /* Name hidden here; trim the trailing padding before the burger. */
+    #current-user {
+      padding-right: 0.5rem;
+    }
+    .notification-stack {
       width: 100%;
-      bottom: 5px;
       left: 0px;
       margin-left: 0px;
     }
     body {
       min-height: 120vh;
-    }
-    .navbar-menu.is-active {
-      position: absolute;
-      right: 0px;
     }
   }
 </style>
@@ -432,8 +453,8 @@
 
   {% if not blank_page %}
   <div class="container" style="padding: 5px; max-width: 900px;">
-    <nav class="navbar" role="navigation" aria-label="main navigation">
-      <div class="navbar-brand" id="brand" style="padding-left: 10px">
+    <nav class="navbar is-primary" role="navigation" aria-label="main navigation">
+      <div class="navbar-brand ml-0" id="brand">
         <a id="home" class="navbar-item" href="{{ url_for('home.home') }}">
           <i class="icon icon-home-2" title="Home"></i>
           {# MSG: Navigation link for the home page. #}
@@ -461,6 +482,14 @@
           {# MSG: Navigation link for the page used to get new songs into the library. #}
           <span>{% trans %}Add New{% endtrans %}</span>
         </a>
+        {# The person item: "Join in" (green tint) until named, then the name,
+           set by JS from the cookie with no reload. #}
+        <a id="current-user" class="navbar-item has-text-success" href="#"
+          aria-label="{% trans %}Join in{% endtrans %}">
+          {# Avatar slot: the glyph fills the circle now; a later PR swaps in a photo. #}
+          <span class="singer-avatar"><i class="icon icon-user-circle-o"></i></span>
+          <span class="is-truncated">{% trans %}Join in{% endtrans %}</span>
+        </a>
         <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
           {# Bulma 1.x's burger needs four bars: the first two stack in the centre
              and rotate into the close (X), the third and fourth are the top and
@@ -471,53 +500,46 @@
           <span aria-hidden="true"></span>
         </a>
       </div>
-      <div class="navbar-menu" id="menu">
+      {# One hamburger at every width. The brand burger toggles this panel, and
+         custom.css keeps the navbar in burger mode on desktop too, so the menu
+         is identical on a phone and a desktop. The main nav (Home, Queue, Songs,
+         Add New) stays in the bar; everything else lives here. The pages you act
+         on come first, then a divider and Info last as the "about this box" page. #}
+      <div class="navbar-menu mr-0" id="menu">
         <div class="navbar-end">
-          <a id="current-user" class="navbar-item is-hidden" href="#">
-            <i class="icon  icon-mic-1" title="Current user"></i>
-            <span></span>
+          <a id="charts" class="navbar-item" href="{{ url_for('charts.charts') }}">
+            <i class="icon icon-sort-up"></i>
+            {# MSG: Menu link to the most requested songs and the number one hits. #}
+            <span>{% trans %}Charts{% endtrans %}</span>
           </a>
-          <!-- Home for settings and admin tools, so the main nav stays the
-               four things a singer actually uses. -->
-          <div id="pikaraoke-menu" class="navbar-item has-dropdown is-hoverable">
-            <a class="navbar-link">
-              <i class="icon icon-info-circled-1" title="Pikaraoke"></i>
-              <span>Pikaraoke</span>
-            </a>
-            <!-- Split by audience, not by topic. Above the divider is what the
-                 room came for: the stats and the log, open to every device.
-                 Below it is running the machine and running the night. -->
-            <div class="navbar-dropdown is-right">
-              <a id="charts" class="navbar-item" href="{{ url_for('charts.charts') }}">
-                <i class="icon icon-sort-up"></i>
-                {# MSG: Dropdown link to the most requested songs and the number one hits. #}
-                <span>{% trans %}Charts{% endtrans %}</span>
-              </a>
-              <a id="rankings" class="navbar-item" href="{{ url_for('sessions.rankings') }}">
-                <i class="icon icon-th-list-outline"></i>
-                {# MSG: Dropdown link to the most-played songs and most active singers. #}
-                <span>{% trans %}Rankings{% endtrans %}</span>
-              </a>
-              <a id="history" class="navbar-item" href="{{ url_for('sessions.history') }}">
-                <i class="icon icon-list-alt"></i>
-                {# MSG: Dropdown link to the log of everything that has been sung. #}
-                <span>{% trans %}Play History{% endtrans %}</span>
-              </a>
-              <hr class="navbar-divider">
-              {% if is_admin() %}
-              <a id="sessions" class="navbar-item" href="{{ url_for('sessions.sessions') }}">
-                <i class="icon icon-mic-1"></i>
-                {# MSG: Dropdown link to the karaoke session management page, only shown to the host. #}
-                <span>{% trans %}Sessions{% endtrans %}</span>
-              </a>
-              {% endif %}
-              <a id="info" class="navbar-item" href="{{ url_for('info.info') }}">
-                <i class="icon icon-cog"></i>
-                {# MSG: Dropdown link to the settings and system information page. #}
-                <span>{% trans %}Settings{% endtrans %}</span>
-              </a>
-            </div>
-          </div>
+          <a id="rankings" class="navbar-item" href="{{ url_for('sessions.rankings') }}">
+            <i class="icon icon-th-list-outline"></i>
+            {# MSG: Menu link to the most-played songs and most active singers. #}
+            <span>{% trans %}Rankings{% endtrans %}</span>
+          </a>
+          <a id="history" class="navbar-item" href="{{ url_for('sessions.history') }}">
+            <i class="icon icon-list-alt"></i>
+            {# MSG: Menu link to the log of everything that has been sung. #}
+            <span>{% trans %}Play History{% endtrans %}</span>
+          </a>
+          {% if is_admin() %}
+          <a id="sessions" class="navbar-item" href="{{ url_for('sessions.sessions') }}">
+            <i class="icon icon-mic-1"></i>
+            {# MSG: Menu link to the karaoke session management page, only shown to the host. #}
+            <span>{% trans %}Sessions{% endtrans %}</span>
+          </a>
+          {% endif %}
+          <a id="settings" class="navbar-item" href="{{ url_for('settings.settings') }}">
+            <i class="icon icon-cog"></i>
+            {# MSG: Menu link to the settings and host controls page. #}
+            <span>{% trans %}Settings{% endtrans %}</span>
+          </a>
+          <hr class="navbar-divider">
+          <a id="info" class="navbar-item" href="{{ url_for('info.info') }}">
+            <i class="icon icon-info-circled-1"></i>
+            {# MSG: Menu link to the page with the QR code to join and the system information. #}
+            <span>{% trans %}Info{% endtrans %}</span>
+          </a>
         </div>
       </div>
     </nav>
@@ -532,37 +554,56 @@
       aria-label="{{ _('Current session: {name}').replace('{name}', session_name) }}"
       title="{{ session_name }}">
       <span class="session-ribbon-dot" aria-hidden="true"></span>
-      <span class="session-ribbon-text">{{ session_name }}</span>
+      <span class="session-ribbon-text is-truncated">{{ session_name }}</span>
     </div>
 
-    {% if get_flashed_messages() %}
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-    <div id="notification" class="notification base-notification {{category}}">
-      <button id="notification-close" class="delete"></button>
-      <div class="flash">{{ message }}</div>
-    </div>
-    {% endfor %}
-    {% endif %}
-
-    <!-- Alternate notification for js-fired notifications using showNotification -->
-    <div id="notification-alt" class="notification base-notification" style="display: none">
-      <button id="notification-close" class="delete"></button>
-      <div class="flash"></div>
+    <!-- Server flashes render into the same stack showNotification appends to. -->
+    <div id="notification-stack" class="notification-stack">
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="notification base-notification mb-0 {{ category }}">
+        <button class="delete" aria-label="close"></button>
+        <div class="flash">{{ message }}</div>
+      </div>
+      {% endfor %}
     </div>
 
     <div class="box" style="margin-top: 5px;">
       {# Written once here rather than per page: the heading is chrome, and its
          text is the same string the <title> tag uses. #}
-      <header class="page-header">
-        <div class="page-heading">
-          <h1 class="title">{% block heading %}{{ title }}{% endblock %}</h1>
+      <header class="block">
+        <div class="is-flex is-justify-content-space-between is-align-items-baseline is-gap-2">
+          <h1 class="title has-text-weight-normal mb-0">{% block heading %}{{ title }}{% endblock %}</h1>
           {% block heading_action %}{% endblock %}
         </div>
         {% block header %}{% endblock %}
       </header>
-      <div class="content">
-        {% block content %}
-        {% endblock %}
+      {% block content %}
+      {% endblock %}
+    </div>
+
+    {# Reusable text-prompt dialog, kept outside .box so SPA navigation (which
+       swaps only .box) cannot destroy it. Driven by promptForText(). #}
+    <div class="modal" id="text-prompt-modal">
+      <div class="modal-background"></div>
+      <div class="modal-card">
+        <header class="modal-card-head">
+          <p class="modal-card-title is-size-5 mb-0" id="text-prompt-title"></p>
+          <button class="delete text-prompt-cancel" aria-label="close"></button>
+        </header>
+        <section class="modal-card-body">
+          <p class="mb-3 is-hidden" id="text-prompt-message"></p>
+          <div class="field">
+            <label class="label is-hidden" id="text-prompt-label" for="text-prompt-input"></label>
+            <div class="control">
+              <input id="text-prompt-input" class="input" type="text" autocomplete="off">
+            </div>
+            <p class="help is-hidden" id="text-prompt-help"></p>
+          </div>
+        </section>
+        <footer class="modal-card-foot is-justify-content-flex-end">
+          <button class="button is-primary" id="text-prompt-ok">{% trans %}Save{% endtrans %}</button>
+          <button class="button text-prompt-cancel">{% trans %}Cancel{% endtrans %}</button>
+        </footer>
       </div>
     </div>
   </div>

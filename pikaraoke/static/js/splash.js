@@ -1,5 +1,5 @@
 const withBasePath = (path) => `${window.pikaraokeConfig.basePath}${path}`;
-let socket = io({ path: window.pikaraokeConfig.socketioPath });
+const socket = io({ path: window.pikaraokeConfig.socketioPath });
 let mouseTimer = null;
 let cursorVisible = false;
 let nowPlaying = {};
@@ -8,7 +8,6 @@ let showMenu = false;
 let menuButtonVisible = false;
 let autoplayConfirmed = false;
 let volume = 0.85;
-const playbackStartTimeout = 10000;
 const bgMediaResumeDelay = 2000;
 const bgVideoChoices = PikaraokeConfig.bgVideoChoices;
 let currentVideoUrl = null;
@@ -232,9 +231,11 @@ const playBGVideo = async (play) => {
 }
 
 const shouldBackgroundMediaPlay = () => {
-  return autoplayConfirmed &&
-    !nowPlaying.now_playing &&
-    !nowPlaying.up_next;
+  if (!autoplayConfirmed || nowPlaying.now_playing) return false;
+  // A queued song with autoplay on is a brief splash-delay gap before it starts,
+  // so hold the background off. With autoplay off that song waits indefinitely
+  // for its singer, so play the background through the wait rather than go dark.
+  return !nowPlaying.up_next || !nowPlaying.autoplay;
 };
 
 // Asserts both media's desired state rather than acting on the one that moved,
@@ -263,20 +264,13 @@ const updateBackgroundMediaState = (immediate = false) => {
   }, bgMediaResumeDelay);
 };
 
-const flashNotification = (message, categoryClass) => {
-  const sn = $("#splash-notification");
-  if (sn.text()) return;
-  // Text, not HTML: notifications carry singer names typed on guests' phones.
-  sn.text(message);
-  sn.addClass(categoryClass);
-  sn.fadeIn();
-  setTimeout(() => {
-    sn.fadeOut();
-    setTimeout(() => {
-      sn.html("");
-      sn.removeClass(categoryClass);
-    }, 450);
-  }, 3000);
+// dedupeKey holds a recurring status to one slot, so a flapping socket does not
+// pile identical connection-lost toasts.
+const flashNotification = (message, categoryClass, { dedupeKey } = {}) => {
+  const $stack = $("#splash-notification");
+  if (dedupeKey && $stack.find(`[data-dedupe="${dedupeKey}"]`).length) return;
+  const $toast = window.addToast($stack, message, categoryClass, { closeable: false });
+  if (dedupeKey) $toast.attr("data-dedupe", dedupeKey);
 }
 
 const setupScreensaver = () => {
@@ -438,15 +432,12 @@ const handleNowPlayingUpdate = (np) => {
       setTimeout(() => video.play(), 1000);
     });
 
-    const loadedPlaybackId = currentPlaybackId;
-    setTimeout(() => {
-      // Only the master ends a song, and only the one this timer was armed for.
-      if (!isMaster || loadedPlaybackId !== currentPlaybackId) return;
-      // A paused video is a failure too: a blocked autoplay stays silent forever.
-      if (!isMediaPlaying(video) && !nowPlaying.is_paused) {
-        endSong("failed to start");
-      }
-    }, playbackStartTimeout);
+    // Start-failure detection is server-side and progress-aware (the server ends
+    // a song that never confirms a start while the transcode has stalled). A
+    // client timer that fires "failed to start" whenever the video is not playing
+    // at that instant used to kill a song that had started and was merely
+    // buffering during a long transcode, and a restored or stale tab could fire it
+    // for the whole kiosk - so it is gone.
   }
 }
 
@@ -465,8 +456,9 @@ const applyIntermission = (np) => {
   intermissionCountdown.sync(active ? brk : null);
   if (isMaster && autoplayConfirmed && active) {
     getIntermissionPlayer().sync(brk);
-  } else {
-    getIntermissionPlayer().stop(active ? 300 : 2500);
+  } else if (intermissionPlayer) {
+    // Nothing to stop until a break has played here.
+    intermissionPlayer.stop(active ? 300 : 2500);
   }
 };
 
@@ -545,7 +537,6 @@ const setupOverlayMenus = () => {
       $('#menu-container iframe').attr('src', '');
       showMenu = false;
     } else {
-      setUserCookie();
       $("#menu-container").show();
       $("#menu-container iframe").attr("src", withBasePath("/"));
       showMenu = true;
@@ -571,10 +562,15 @@ const setupVideoPlayer = () => {
     }
   });
 
-  // Master reports playback position to server
+  // Every playing tab beacons its position (with the playback it is on) once a
+  // second. The server uses these beacons both to keep the position current and
+  // to elect the master: the master must be a tab that is actually playing the
+  // current playback, so a dead or restored tab that merely registered cannot
+  // hold the seat. The server accepts the position only from the master and
+  // ignores beacons for a playback other than the one loaded.
   setInterval(() => {
-    if (isMaster && isMediaPlaying(video)) {
-      socket.emit("playback_position", video.currentTime);
+    if (isMediaPlaying(video)) {
+      socket.emit("playback_position", video.currentTime, currentPlaybackId);
     }
   }, 1000);
 
@@ -699,11 +695,11 @@ const setupSocketEvents = () => {
   });
   socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
-    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger");
+    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger", { dedupeKey: "connection-lost" });
   });
   socket.on('disconnect', (reason) => {
     console.warn('Socket disconnected:', reason);
-    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger");
+    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger", { dedupeKey: "connection-lost" });
   });
   socket.on('pause', () => {
     const video = getVideoPlayer();
@@ -758,9 +754,6 @@ const setupSocketEvents = () => {
     const message = notification[0];
     const categoryClass = notification.length > 1 ? notification[1] : "is-primary";
     flashNotification(message, categoryClass);
-    if (isMaster) {
-      socket.emit("clear_notification");
-    }
   });
   socket.on("now_playing", handleNowPlayingUpdate);
   socket.on("join_code_changed", () => { refreshQrCode(); refreshAllInOne(); });
@@ -789,15 +782,14 @@ const setupSocketEvents = () => {
 }
 
 const handleSocketRecovery = () => {
-  // A socket may disconnect if the tab is backgrounded for a while
-  // Reconnect and configure event listeners when tab becomes visible again
+  // A socket may disconnect if the tab is backgrounded for a while.
+  // Reconnect when the tab becomes visible again, but do not set the listeners
+  // up again: io() multiplexes, so it hands back this same socket, and a second
+  // setupSocketEvents() would leave every event handled twice over.
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === 'visible') {
       autoplayConfirmed && loadNowPlaying();
-      if (!socket.connected) {
-        socket = io({ path: window.pikaraokeConfig.socketioPath });
-        setupSocketEvents();
-      }
+      if (!socket.connected) socket.connect();
     }
   });
 }
@@ -879,4 +871,37 @@ handleSocketRecovery();
 if (socket.connected) {
   console.log('Socket already connected, registering splash...');
   socket.emit("register_splash");
+}
+
+// Test exports. In the browser this is a no-op: `module` is not defined
+// there. Under the test runner's CommonJS load, the functions and the
+// module state become importable.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    isMediaPlaying, formatTime, parsePreferenceValue,
+    handleNowPlayingUpdate, endSong, flashNotification,
+    applyPreferenceUpdate, applyPreferencesReset,
+    applyUIScale, effectiveUIScale,
+    shouldBackgroundMediaPlay, getNextBgMusicSong,
+    PREFERENCE_EFFECTS,
+    renderAllInOne,
+    // The let-bound module state, so tests read and write the same
+    // storage the code uses, not a copy.
+    get state() {
+      return {
+        get isMaster() { return isMaster; },
+        set isMaster(v) { isMaster = v; },
+        get currentPlaybackId() { return currentPlaybackId; },
+        set currentPlaybackId(v) { currentPlaybackId = v; },
+        get currentVideoUrl() { return currentVideoUrl; },
+        set currentVideoUrl(v) { currentVideoUrl = v; },
+        get nowPlaying() { return nowPlaying; },
+        set nowPlaying(v) { nowPlaying = v; },
+        get autoplayConfirmed() { return autoplayConfirmed; },
+        set autoplayConfirmed(v) { autoplayConfirmed = v; },
+        get bgPlaylist() { return bg_playlist; },
+        set bgPlaylist(v) { bg_playlist = v; },
+      };
+    },
+  };
 }

@@ -9,6 +9,7 @@ import pytest
 from pikaraoke.lib.file_resolver import (
     FileResolver,
     create_tmp_dir,
+    delete_stream_files,
     delete_tmp_dir,
     get_tmp_dir,
     is_cdg_file,
@@ -195,6 +196,71 @@ class TestDeleteTmpDir:
             delete_tmp_dir()  # Should not raise
 
 
+class TestDeleteStreamFiles:
+    """Tests for delete_stream_files."""
+
+    def test_leaves_another_streams_files(self, tmp_path):
+        """A song ending must not delete a concurrently starting song's files."""
+        ending = "111"
+        starting = "222"
+        (tmp_path / f"{ending}.m3u8").write_text("old")
+        (tmp_path / f"{ending}_segment_000.m4s").write_text("old")
+        (tmp_path / f"{starting}.m3u8").write_text("new")
+        (tmp_path / f"{starting}_init.mp4").write_text("new")
+
+        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+            delete_stream_files(ending)
+
+        assert not (tmp_path / f"{ending}.m3u8").exists()
+        assert not (tmp_path / f"{ending}_segment_000.m4s").exists()
+        assert (tmp_path / f"{starting}.m3u8").exists()
+        assert (tmp_path / f"{starting}_init.mp4").exists()
+
+    def test_leaves_a_longer_uid_that_contains_this_one(self, tmp_path):
+        """A uid matches on its boundary, not as a bare substring of a longer uid."""
+        ending = "12"
+        longer = "123"
+        (tmp_path / f"{ending}.m3u8").write_text("old")
+        (tmp_path / f"{longer}.m3u8").write_text("keep")
+        (tmp_path / f"{longer}_init.mp4").write_text("keep")
+
+        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+            delete_stream_files(ending)
+
+        assert not (tmp_path / f"{ending}.m3u8").exists()
+        assert (tmp_path / f"{longer}.m3u8").exists()
+        assert (tmp_path / f"{longer}_init.mp4").exists()
+
+    def test_removes_the_streams_extraction_dir(self, tmp_path):
+        """A zipped-CDG song's uid-scoped extraction dir is cleaned, not just files."""
+        uid = "456"
+        extracted = tmp_path / f"{uid}_extracted"
+        extracted.mkdir()
+        (extracted / "track.mp3").write_text("x")
+        (extracted / "track.cdg").write_text("x")
+        (tmp_path / f"{uid}.m3u8").write_text("x")
+
+        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+            delete_stream_files(uid)
+
+        assert not extracted.exists()
+        assert not (tmp_path / f"{uid}.m3u8").exists()
+
+    def test_none_uid_is_noop(self, tmp_path):
+        """A missing uid deletes nothing rather than guessing."""
+        (tmp_path / "333.m3u8").write_text("keep")
+        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+            delete_stream_files(None)
+        assert (tmp_path / "333.m3u8").exists()
+
+    def test_handles_nonexistent_dir(self, tmp_path):
+        """Deleting from a dir that isn't there does not raise."""
+        with patch(
+            "pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path / "nonexistent")
+        ):
+            delete_stream_files("123")  # Should not raise
+
+
 class TestFileResolverInit:
     """Tests for FileResolver initialization."""
 
@@ -375,10 +441,9 @@ class TestFileResolverHandleZippedCdg:
     @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
     @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
     def test_extracts_valid_zip(self, mock_create, mock_duration, tmp_path):
-        """Test extracting valid CDG zip file."""
+        """Test extracting valid CDG zip into a uid-scoped directory."""
         # Create a valid CDG zip
         zip_path = tmp_path / "song.zip"
-        extracted_dir = tmp_path / "extracted"
 
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("track.mp3", b"fake mp3 data")
@@ -391,6 +456,8 @@ class TestFileResolverHandleZippedCdg:
         assert "track.mp3" in fr.file_path
         assert fr.cdg_file_path is not None
         assert "track.cdg" in fr.cdg_file_path
+        # Extraction is scoped to the stream, so scoped cleanup removes it.
+        assert f"{fr.stream_uid}_extracted" in fr.file_path
 
     @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
     def test_raises_when_zip_missing_cdg(self, mock_create, tmp_path):

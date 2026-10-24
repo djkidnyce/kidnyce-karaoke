@@ -90,6 +90,29 @@ class TestQueueRoutes:
         assert json.loads(response.data)["success"] is False
 
 
+class TestEnqueueRequiresName:
+    """A queue add must carry a name. A blank performer writes a leaderboard row
+    no UI can correct, and nothing legitimate sends one."""
+
+    @pytest.mark.parametrize("name", ["", "   ", "\t"])
+    @patch("pikaraoke.routes.queue_api.get_karaoke_instance")
+    def test_blank_name_refused(self, mock_get_instance, client, name):
+        response = client.post(
+            "/api/enqueue", data={"song_to_add": "Song.mp4", "song_added_by": name}
+        )
+
+        assert response.status_code == 422
+        # Validation refuses before the view runs, so nothing is queued.
+        mock_get_instance.assert_not_called()
+
+    @patch("pikaraoke.routes.queue_api.get_karaoke_instance")
+    def test_absent_name_refused(self, mock_get_instance, client):
+        response = client.post("/api/enqueue", data={"song_to_add": "Song.mp4"})
+
+        assert response.status_code == 422
+        mock_get_instance.assert_not_called()
+
+
 class TestQueueApiContract:
     """Tests that verify the queue API returns expected data structure.
 
@@ -272,4 +295,18 @@ class TestQueueEditSocketUpdates:
         assert data["success"] is True
         assert qm.queue[3]["file"] == "/songs/song2.mp4"
         assert len(queue_updates) == 1, "queue_update event should be emitted once"
+        assert len(now_playing_updates) == 1, "now_playing_update event should be emitted once"
+
+    @patch("pikaraoke.routes.queue_api.get_karaoke_instance")
+    def test_queue_pitch_sets_song_key(self, mock_get_instance, client_with_session, queue_env):
+        """Pre-setting a queued song's key updates it and emits now_playing_update."""
+        qm, mock_karaoke, _queue_updates, now_playing_updates = queue_env
+        qm.queue = [_make_queue_item(1), _make_queue_item(2)]
+        mock_get_instance.return_value = mock_karaoke
+
+        response = client_with_session.post("/api/queue/pitch?song=/songs/song1.mp4&semitones=4")
+
+        assert response.status_code == 200
+        assert response.get_json()["success"] is True
+        assert qm.queue[0]["semitones"] == 4
         assert len(now_playing_updates) == 1, "now_playing_update event should be emitted once"

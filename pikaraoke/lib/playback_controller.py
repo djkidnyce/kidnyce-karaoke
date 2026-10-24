@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable
 from flask_babel import _
 
 from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.file_resolver import delete_tmp_dir
+from pikaraoke.lib.file_resolver import delete_stream_files
 from pikaraoke.lib.preference_manager import PreferenceManager
 from pikaraoke.lib.stream_manager import PlaybackResult, StreamManager
 
@@ -19,6 +19,17 @@ if TYPE_CHECKING:
 # score screen, which holds the player's end report for about 15s, and a slow
 # start; late is harmless, early cuts a song.
 OVERRUN_MARGIN_S = 30
+
+# Start watchdog: how long FFmpeg may go without producing a new segment before a
+# song that the client has not confirmed as started is ended as "failed to start".
+# Long enough to ride out a healthy 8x transcode of a long song, short enough to
+# catch a genuinely stalled encoder.
+START_WATCHDOG_STALL_S = 15
+
+# Start watchdog: hard cap on how long the server waits for the client to confirm a
+# start, even while FFmpeg keeps producing segments. Catches the cases the stall
+# test cannot - a blocked-autoplay client, or a tab that loaded but will not play.
+START_WATCHDOG_HARD_S = 45
 
 
 class PlaybackController:
@@ -53,8 +64,14 @@ class PlaybackController:
     playback_id: str | None = None
     is_paused: bool = True
     is_playing: bool = False
+    # Cleared in reset_now_playing so a stale press never carries into the next song.
+    start_requested: bool = False
     _deadline: float | None = None
     _paused_at: float | None = None
+    # Start watchdog: set while play_file waits for the client to confirm a start.
+    _start_watchdog_started_at: float | None = None
+    _last_progress_at: float | None = None
+    _last_progress_sig: tuple[int, int] | None = None
 
     def __init__(
         self,
@@ -125,13 +142,7 @@ class PlaybackController:
 
         self.events.emit("playback_started")
 
-        # Wait for client to connect
-        max_retries = 100
-        while not self.is_playing and max_retries > 0:
-            time.sleep(0.1)
-            max_retries -= 1
-
-        if not self.is_playing:
+        if not self._wait_for_start():
             error_msg = _("Stream was not playable! Skipping track")
             logging.error(error_msg)
             self.end_song("timeout", self.playback_id)
@@ -156,6 +167,48 @@ class PlaybackController:
         across an upgrade is ignored until it reloads.
         """
         return self.playback_id is not None and playback_id == self.playback_id
+
+    def _wait_for_start(self) -> bool:
+        """Wait for the client to confirm a start, watching transcode progress.
+
+        play_file() blocks in this greenlet while FFmpeg keeps transcoding in a
+        separate one, so the run loop's tick-based watchdogs cannot reach the
+        load-to-start window. This loop is that watchdog: it stays asleep while
+        FFmpeg produces new segments (a slow but healthy transcode of a long song
+        is not a failure) and only gives up when the client has not confirmed a
+        start after FFmpeg has stalled, or after the hard cap even if FFmpeg is
+        still producing.
+
+        Returns:
+            True if a start was confirmed, False if the wait ended without one.
+        """
+        started_at = time.monotonic()
+        self._start_watchdog_started_at = started_at
+        self._last_progress_at = started_at
+        self._last_progress_sig = None
+        while not self.is_playing:
+            now = time.monotonic()
+            if now - started_at > START_WATCHDOG_HARD_S:
+                logging.warning("Client did not confirm a start within the start window")
+                break
+            progress = self.stream_manager.transcode_progress(self.playback_id)
+            if progress is not None and progress != self._last_progress_sig:
+                # FFmpeg is still producing: a slow transcode is not a failure.
+                self._last_progress_sig = progress
+                self._last_progress_at = now
+            elif progress is None and now - self._last_progress_at > START_WATCHDOG_STALL_S:
+                # Nothing to watch and no recent start signal: the client is gone.
+                logging.warning("No start reported and no transcode progress")
+                break
+            elif now - self._last_progress_at > START_WATCHDOG_STALL_S:
+                # FFmpeg has stopped producing and the client never confirmed.
+                logging.warning("Transcode stalled with no confirmed start")
+                break
+            time.sleep(0.5)
+        self._start_watchdog_started_at = None
+        self._last_progress_at = None
+        self._last_progress_sig = None
+        return self.is_playing
 
     def start_song(self, playback_id: str | None) -> None:
         """Mark the current song as actively playing.
@@ -217,6 +270,8 @@ class PlaybackController:
             return
 
         logging.info(f"Song ending: {self.now_playing}")
+        # Read before reset_now_playing clears it; the scoped cleanup below needs it.
+        stream_uid = self.playback_id
         # Claim the playback before anything that yields to another greenlet, so
         # a second caller arriving mid-cleanup is rejected by the guard above.
         self.reset_now_playing()
@@ -227,7 +282,7 @@ class PlaybackController:
 
         if reason:
             logging.info(f"Reason: {reason}")
-            if reason not in ("complete", "skip", "transpose"):
+            if reason not in ("complete", "skip", "transpose", "restart"):
                 # MSG: Message shown when the song ends abnormally
                 self.events.emit("notification", _("Song ended abnormally: %s") % reason, "danger")
 
@@ -235,7 +290,7 @@ class PlaybackController:
         # Small delay to ensure FFmpeg fully terminates and file handles close
         # Critical on Raspberry Pi with slow SD cards and hardware encoder cleanup
         time.sleep(0.3)
-        delete_tmp_dir()
+        delete_stream_files(stream_uid)
         logging.debug("Cleanup complete")
 
         self.events.emit("song_ended", reason)
@@ -284,6 +339,10 @@ class PlaybackController:
             logging.warning("Tried to pause, but no file is playing!")
             return False
 
+    def request_start(self) -> None:
+        """Arm the waiting song to start; the run loop pops it on the next tick."""
+        self.start_requested = True
+
     def _hold_deadline_while_paused(self) -> None:
         """Push the deadline back by however long the song sat paused."""
         now = time.monotonic()
@@ -322,6 +381,7 @@ class PlaybackController:
         self.now_playing_subtitle_url = None
         self.is_paused = True
         self.is_playing = False
+        self.start_requested = False
         self.now_playing_transpose = 0
         self.now_playing_duration = None
         self.now_playing_position = None

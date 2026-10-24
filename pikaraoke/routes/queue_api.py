@@ -5,7 +5,7 @@ from urllib.parse import unquote
 import flask_babel
 from flask import Response, jsonify
 from flask_smorest import Blueprint
-from marshmallow import Schema, fields
+from marshmallow import Schema, ValidationError, fields, validates_schema
 
 from pikaraoke.lib.auth import public
 from pikaraoke.lib.current_app import broadcast_event, get_karaoke_instance
@@ -27,14 +27,28 @@ class ReorderForm(Schema):
 class EnqueueForm(Schema):
     song_to_add = fields.String(required=True, metadata={"description": "Path to the song file"})
     song_added_by = fields.String(
-        load_default="", metadata={"description": "Name of the user adding the song"}
+        required=True, metadata={"description": "Name of the user adding the song"}
     )
+
+    @validates_schema
+    def check_name(self, data, **kwargs):
+        # Whitespace-only is blank: it would be truthy everywhere the name is read.
+        if not data["song_added_by"].strip():
+            # MSG: Error when a song is queued without a name
+            raise ValidationError(_("A name is required"), "song_added_by")
 
 
 class QueueEditQuery(Schema):
     action = fields.String(required=True, metadata={"description": "Queue edit action to perform"})
     song = fields.String(
         metadata={"description": "Path to the song file (required unless action is 'clear')"}
+    )
+
+
+class QueuePitchQuery(Schema):
+    song = fields.String(required=True, metadata={"description": "Path to the song file"})
+    semitones = fields.Integer(
+        required=True, metadata={"description": "Key the song will transcode in when it starts"}
     )
 
 
@@ -97,6 +111,19 @@ def queue_edit(query):
 
     # QueueManager emits queue_update and now_playing_update itself, and Karaoke
     # bridges those to the socket -- so this path adds no broadcast_event.
+    return jsonify({"success": success})
+
+
+@queue_api_bp.route("/api/queue/pitch", methods=["POST"])
+@queue_api_bp.arguments(QueuePitchQuery, location="query")
+def queue_pitch(query):
+    """Pre-set the key a queued song transcodes in when it starts (admin only).
+
+    QueueManager emits now_playing_update itself, which Karaoke bridges to the
+    socket, so this path adds no broadcast_event.
+    """
+    k = get_karaoke_instance()
+    success = k.queue_manager.set_song_semitones(unquote(query["song"]), query["semitones"])
     return jsonify({"success": success})
 
 

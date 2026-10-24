@@ -10,7 +10,6 @@
     const config = {
         contentSelector: '.box',
         linkSelector: 'a[href]', // Intercept all links, not just navbar
-        notificationSelector: '#notification-alt',
         scrollBehavior: 'smooth'
     };
 
@@ -55,6 +54,96 @@
     let currentPath = window.location.pathname + window.location.search;
     let loadedResources = new Set(); // Track loaded external resources
     let isInitialized = false; // Prevent multiple initializations
+
+    // Page-scoped socket listeners, dropped on the next navigation. The SPA
+    // re-runs each page's script, so a plain bind would stack duplicates.
+    let pageSocketSubs = [];
+
+    // Subscribe to a socket event for the current page only. base.html's
+    // permanent handlers use window.socket.on instead.
+    window.onPageSocket = function (event, handler) {
+        window.socket.on(event, handler);
+        pageSocketSubs.push([event, handler]);
+        return handler;
+    };
+
+    // One source of truth for the now-playing indicator the home, queue and
+    // history pages each draw: a song is playing when one is loaded and not paused.
+    window.isNowPlaying = function (np) {
+        return !!(np && np.now_playing && !np.is_paused);
+    };
+
+    // Reusable clickable text-prompt over #text-prompt-modal. Resolves a
+    // $.Deferred with the trimmed input on save, rejects on cancel/Escape/
+    // background. $.Deferred not a Promise: cancel is normal, and a rejected
+    // Promise with no .catch() logs on every dismissal.
+    window.promptForText = function (opts) {
+        opts = opts || {};
+        const d = $.Deferred();
+        const $modal = $('#text-prompt-modal');
+        if (!$modal.length) {
+            // No dialog on this page (the chromeless splash renders none).
+            return d.reject();
+        }
+        const $input = $('#text-prompt-input');
+        const $ok = $('#text-prompt-ok');
+
+        $('#text-prompt-title').text(opts.title || '');
+        $('#text-prompt-message').text(opts.message || '').toggleClass('is-hidden', !opts.message);
+        $('#text-prompt-label').text(opts.label || '').toggleClass('is-hidden', !opts.label);
+        $('#text-prompt-help').text(opts.help || '').toggleClass('is-hidden', !opts.help);
+        $input.val(opts.value || '').attr('placeholder', opts.placeholder || '');
+
+        // Namespaced so a prior, unclosed prompt leaves no handler behind.
+        function teardown() {
+            $modal.removeClass('is-active');
+            $ok.off('.prompt');
+            $modal.find('.text-prompt-cancel, .modal-background').off('.prompt');
+            $input.off('.prompt');
+        }
+        function accept() {
+            const value = $input.val().trim();
+            if (!value) {
+                return; // Save stays inert on a blank name.
+            }
+            teardown();
+            d.resolve(value);
+        }
+        function dismiss() {
+            teardown();
+            d.reject();
+        }
+
+        $ok.on('click.prompt', accept);
+        $modal.find('.text-prompt-cancel, .modal-background').on('click.prompt', dismiss);
+        $input.on('keydown.prompt', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                accept();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                dismiss();
+            }
+        });
+        $input.on('input.prompt', function () {
+            $ok.prop('disabled', !$input.val().trim());
+        });
+
+        $ok.prop('disabled', !$input.val().trim());
+        $modal.addClass('is-active');
+        $input.trigger('focus').trigger('select');
+        return d;
+    };
+
+    // Identity wrapper: resolves { name } so a later language or avatar is an
+    // added key, not a changed return shape.
+    window.promptForIdentity = function (opts) {
+        const d = $.Deferred();
+        window.promptForText(opts)
+            .done(function (name) { d.resolve({ name: name }); })
+            .fail(function () { d.reject(); });
+        return d;
+    };
 
     /**
      * Initialize SPA navigation
@@ -105,6 +194,15 @@
             $('.navbar-burger').toggleClass('is-active');
             $('.navbar-menu').toggleClass('is-active');
         });
+
+        // Close the open menu on a click outside it or the burger.
+        $(document).off('click.navbarOutside');
+        $(document).on('click.navbarOutside', function(e) {
+            if (!$('.navbar-menu').hasClass('is-active')) return;
+            if ($(e.target).closest('.navbar-menu, .navbar-burger').length) return;
+            $('.navbar-burger').removeClass('is-active');
+            $('.navbar-menu').removeClass('is-active');
+        });
     }
 
     /**
@@ -118,22 +216,20 @@
         // Bind with event delegation
         $(document).on('click', '#current-user', function(e) {
             e.preventDefault();
-            // Get the current name from the cookie dynamically
-            let currentName = Cookies.get("user");
-            var promptMsg = (window.translations && window.translations.promptChangeUsername)
-                ? window.translations.promptChangeUsername.replace('{name}', currentName)
-                : "Do you want to change the name of the person using this device? This will show up on queued songs. Current: " + currentName;
-            let name = window.prompt(promptMsg);
-            // Only update if user clicked OK and entered a non-empty name
-            // null = Cancel clicked, "" = OK with empty input
-            if (name !== null && name.trim() !== "") {
-                Cookies.set("user", name, {
+            const currentName = Cookies.get("user") || "";
+            window.promptForIdentity({
+                title: window.translations.identityTitle,
+                label: window.translations.usernameLabel,
+                help: window.translations.usernameHelp,
+                value: currentName
+            }).done(function (res) {
+                Cookies.set("user", res.name, {
                     expires: 3650,
                     path: window.pikaraokeConfig.cookiePath
                 });
-                // Update the displayed name without reloading
-                $("#current-user span").text(name);
-            }
+                // Update the displayed name without reloading.
+                window.setCurrentUser(res.name);
+            });
             // Remove focus from the link to prevent CSS focus styling (black background)
             $(this).blur();
         });
@@ -179,7 +275,7 @@
             const amount = $('#randomNumberInput').val();
             const baseUrl = `${window.pikaraokeConfig.basePath}/api/queue/addrandom`;
             $.post(`${baseUrl}/${amount}`, function (data) {
-                if (!data.success) showNotification(data.message, 'is-warning');
+                if (!data.success) window.showNotification(data.message, 'is-warning');
             });
         });
     }
@@ -333,9 +429,6 @@
 
                 // Update current path
                 currentPath = url;
-
-                // Show success notification (optional, can be commented out)
-                // showNotification('Page loaded', 'is-success', 500);
 
             } else {
                 console.error('Could not find content container in response');
@@ -536,29 +629,14 @@
         // Remove old event handlers on elements that will be replaced
         $(config.contentSelector).off();
 
-        // Note: We don't disconnect socket.io as it should persist across page changes
-        // The socket connection is maintained globally
-    }
-
-    /**
-     * Show a notification message
-     * @param {string} message
-     * @param {string} categoryClass
-     * @param {number} timeout
-     */
-    function showNotification(message, categoryClass, timeout = 3000) {
-        const notification = $(config.notificationSelector);
-        notification.addClass(categoryClass);
-        notification.find('div').text(message);
-        notification.fadeIn();
-
-        setTimeout(function() {
-            notification.fadeOut();
-        }, timeout);
-
-        setTimeout(function() {
-            notification.removeClass(categoryClass);
-        }, timeout + 750);
+        // Drop this page's socket listeners; the socket itself and base.html's
+        // permanent handlers persist.
+        pageSocketSubs.forEach(function (sub) {
+            if (window.socket) {
+                window.socket.off(sub[0], sub[1]);
+            }
+        });
+        pageSocketSubs = [];
     }
 
     window.spaNavigation = {

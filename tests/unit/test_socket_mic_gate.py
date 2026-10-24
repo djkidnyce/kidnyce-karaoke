@@ -33,7 +33,6 @@ PUBLIC_EVENTS = [
     ("connect", ()),
     ("end_song", ("complete",)),
     ("start_song", ()),
-    ("clear_notification", ()),
     ("register_splash", ()),
     ("playback_position", (12.5,)),
     ("disconnect", ()),
@@ -48,6 +47,17 @@ def reset_splash_state():
     socket_events.crowd_connections.clear()
     socket_events.guest_sids.clear()
     socket_events.master_splash_id = None
+    socket_events.splash_liveness.clear()
+    socket_events.splash_last_playback.clear()
+
+
+def elect_master(socketio, app, karaoke):
+    """Register a splash and make it the master, so end_song reaches the gate."""
+    karaoke.playback_controller.playback_id = None
+    client = socketio.test_client(app)
+    client.emit("register_splash")
+    client.emit("playback_position", 0.0)
+    return client
 
 
 def make_socket_app(admin: bool):
@@ -128,6 +138,10 @@ def test_public_handler_is_not_refused(event, args, caplog):
 def test_a_guest_splash_registers_and_reports_position():
     """Election and position in one test: only the elected master is heard."""
     app, socketio, karaoke = make_socket_app(admin=False)
+    # Real values, not MagicMocks: the position assertion would otherwise pass
+    # against a field the handler never set.
+    karaoke.playback_controller.playback_id = None
+    karaoke.playback_controller.now_playing_position = None
     client = socketio.test_client(app)
 
     client.emit("register_splash")
@@ -135,3 +149,26 @@ def test_a_guest_splash_registers_and_reports_position():
 
     assert any(m["name"] == "splash_role" for m in client.get_received())
     assert karaoke.playback_controller.now_playing_position == 12.5
+
+
+def test_the_master_cannot_force_a_failed_to_start():
+    """'failed to start' is decided server-side, so even the master emitting it -
+    e.g. a splash on an older script with a blind start timer - must not end the
+    song."""
+    app, socketio, karaoke = make_socket_app(admin=False)
+    master = elect_master(socketio, app, karaoke)
+
+    master.emit("end_song", "failed to start", "123")
+
+    karaoke.playback_controller.end_song.assert_not_called()
+
+
+def test_the_master_ends_a_song_naturally_without_an_admin_session():
+    """A real end from the master reaches the controller: end_song is gated on
+    the master seat, not on admin."""
+    app, socketio, karaoke = make_socket_app(admin=False)
+    master = elect_master(socketio, app, karaoke)
+
+    master.emit("end_song", "complete", "123")
+
+    karaoke.playback_controller.end_song.assert_called_once_with("complete", "123")

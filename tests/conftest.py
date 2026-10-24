@@ -26,6 +26,7 @@ _BASE_TEMPLATE_ENDPOINTS = [
     ("/browse", "files.browse"),
     ("/search", "search.search"),
     ("/info", "info.info"),
+    ("/settings", "settings.settings"),
     ("/rankings", "sessions.rankings"),
     ("/charts", "charts.charts"),
     ("/history", "sessions.history"),
@@ -280,7 +281,6 @@ class MockKaraoke:
         self.intermission = MockIntermission()
         self.volume = 0.85
         self.running = True
-        self.now_playing_notification = None
 
         # Set preferences that differ from defaults
         self.preferences.set("enable_fair_queue", True)
@@ -323,6 +323,7 @@ class MockKaraoke:
     is_song_in_use = Karaoke.is_song_in_use
     rename_song = Karaoke.rename_song
     reset_now_playing = Karaoke.reset_now_playing
+    _recue_current = Karaoke._recue_current
     transpose_current = Karaoke.transpose_current
     send_notification = Karaoke.send_notification
     log_and_send = Karaoke.log_and_send
@@ -332,7 +333,6 @@ class MockKaraoke:
     vol_down = Karaoke.vol_down
     restart = Karaoke.restart
     stop = Karaoke.stop
-    reset_now_playing_notification = Karaoke.reset_now_playing_notification
 
 
 class MockSongList:

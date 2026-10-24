@@ -31,24 +31,47 @@ def create_tmp_dir() -> None:
         os.makedirs(tmp_dir)
 
 
+def _log_remove_error(path: str, error: BaseException) -> None:
+    # A Windows file is briefly locked after its writer exits; leave it for next run.
+    if isinstance(error, PermissionError):
+        logging.debug(f"Could not delete {path}: file in use, will be cleaned up on next run")
+    else:
+        logging.warning(f"Error deleting {path}: {error}")
+
+
 def delete_tmp_dir() -> None:
-    """Delete the temporary directory and all its contents."""
+    """Delete the whole temporary directory. Only safe when nothing is playing."""
     tmp_dir = get_tmp_dir()
     if os.path.exists(tmp_dir):
-        # On Windows, files may still be locked briefly after process termination
-        # Use error handler to ignore permission errors on individual files
-        def handle_remove_error(func, path, exc_info):
-            """Error handler for shutil.rmtree - ignores permission errors on Windows"""
-            import logging
+        shutil.rmtree(
+            tmp_dir, onerror=lambda func, path, exc_info: _log_remove_error(path, exc_info[1])
+        )
 
-            if isinstance(exc_info[1], PermissionError):
-                logging.debug(
-                    f"Could not delete {path}: file in use, will be cleaned up on next run"
-                )
+
+def delete_stream_files(stream_uid: str | None) -> None:
+    """Delete one stream's files, leaving a concurrently starting song's intact.
+
+    With a short splash delay the next song is already transcoding into this
+    directory, so wiping all of it strands its ffmpeg on files that vanish (254).
+    """
+    if stream_uid is None:
+        return
+    tmp_dir = get_tmp_dir()
+    if not os.path.exists(tmp_dir):
+        return
+    for name in os.listdir(tmp_dir):
+        # Match on a uid boundary, not a bare substring: a shorter uid can sit
+        # inside a longer one, and deleting across streams is the 254 this avoids.
+        if not (name.startswith(f"{stream_uid}.") or name.startswith(f"{stream_uid}_")):
+            continue
+        path = os.path.join(tmp_dir, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)  # a zipped CDG's {uid}_extracted dir
             else:
-                logging.warning(f"Error deleting {path}: {exc_info[1]}")
-
-        shutil.rmtree(tmp_dir, onerror=handle_remove_error)
+                os.remove(path)
+        except OSError as e:
+            _log_remove_error(path, e)
 
 
 def string_to_hash(s: str) -> int:
@@ -127,10 +150,12 @@ class FileResolver:
         """
         create_tmp_dir()
         self.tmp_dir = get_tmp_dir()
-        self.process_file(file_path)
+        # Mint the uid before processing: a zipped CDG extracts into a dir named
+        # for it, so the scoped cleanup can remove that dir with the stream.
         # Include timestamp to ensure unique stream UIDs for repeated plays
         unique_string = f"{file_path}_{time.time()}"
         self.stream_uid = string_to_hash(unique_string)
+        self.process_file(file_path)
         self.streaming_format = streaming_format
 
         # Set output file extension based on streaming format
@@ -189,9 +214,10 @@ class FileResolver:
         Raises:
             Exception: If the zip doesn't contain matching CDG and MP3 files.
         """
-        extracted_dir = os.path.join(self.tmp_dir, "extracted")
-        if os.path.exists(extracted_dir):
-            shutil.rmtree(extracted_dir)  # clears out any previous extractions
+        # Scope the extraction to this stream's uid so delete_stream_files
+        # removes it, and a concurrently starting song gets its own dir instead
+        # of clearing this one out from under a still-reading ffmpeg.
+        extracted_dir = os.path.join(self.tmp_dir, f"{self.stream_uid}_extracted")
         with zipfile.ZipFile(file_path, "r") as zip_ref:
             zip_ref.extractall(extracted_dir)
 

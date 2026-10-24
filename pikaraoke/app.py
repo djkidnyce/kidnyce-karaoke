@@ -31,6 +31,7 @@ from pikaraoke.lib.ffmpeg import is_ffmpeg_installed
 from pikaraoke.lib.file_resolver import delete_tmp_dir
 from pikaraoke.lib.get_platform import get_platform, has_js_runtime, is_windows
 from pikaraoke.lib.guest_gate import install_guest_gate
+from pikaraoke.lib.login_throttle import LoginThrottle
 from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.url_prefix import BasePathMiddleware
 from pikaraoke.lib.youtube_dl import upgrade_youtubedl
@@ -286,6 +287,11 @@ def main() -> None:
         intermission_music_path=args.intermission_music_path,
     )
 
+    # 'autoplay' defaults on, which the store_true CLI path can't express (it
+    # reads a False as "flag not passed"), so persist the disable directly.
+    if args.disable_autoplay:
+        k.preferences.set("autoplay", False)
+
     # expose karaoke object to the flask app
     with app.app_context():
         app.config["KARAOKE_INSTANCE"] = k
@@ -307,6 +313,7 @@ def main() -> None:
     admin_auth = AdminAuth(k.preferences)
     app.secret_key = admin_auth.secret_key
     app.config["ADMIN_AUTH"] = admin_auth
+    app.config["LOGIN_THROTTLE"] = LoginThrottle()
 
     # Passing the flag persists it; omitting it keeps the stored one, empty clears it.
     if args.admin_password is not None:

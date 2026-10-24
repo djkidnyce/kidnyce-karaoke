@@ -1,0 +1,6 @@
+/* Lato served from this host (Kid Nyce: the CSP allows no third party styles or fonts).
+   @fontsource/lato 5.3.0, latin subset. 500 maps to the 400 file. */
+@font-face{font-family:"Lato";font-style:normal;font-weight:300;font-display:swap;src:url("lato-latin-300-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:400;font-display:swap;src:url("lato-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:500;font-display:swap;src:url("lato-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Lato";font-style:normal;font-weight:700;font-display:swap;src:url("lato-latin-700-normal.woff2") format("woff2")}

@@ -61,6 +61,8 @@ jobs:
         fetch-depth: 0  # Required to get all commits for linting
     - name: Run commitlint
       uses: wagoid/commitlint-github-action@v6
+      with:
+        configFile: code_quality/.commitlintrc.yml
 
   smoketest:
     runs-on: ${{ matrix.os }}
@@ -99,6 +101,28 @@ jobs:
 
     - name: Run tests
       run: uv run pytest tests/ -v --cov=pikaraoke --cov-report=term-missing --cov-report=xml:coverage.xml
+
+  # Sibling of the Python unit tests: a Node toolchain failure does not
+  # mask a green Python suite, and the two run in parallel. Coverage is
+  # collected only here; the local pre-commit hook and `npm run test`
+  # run the suite without it.
+  js-unit-tests:
+    runs-on: ubuntu-latest
+    name: JS Unit Tests
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Node
+      # Dev-tooling floor, not the app's: vitest 5 needs node 22+.
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Run JS tests with coverage
+      run: |
+        npm ci --no-audit --no-fund
+        npm run test:coverage
 
   docker-smoketest:
     runs-on: ubuntu-latest

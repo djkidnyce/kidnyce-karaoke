@@ -26,8 +26,8 @@
 # See deploy/README.md for every option and the Cloudflare token setup.
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.1.0"
-APP_VERSION="1.23.0+kidnyce.2"
+INSTALLER_VERSION="1.2.0"
+APP_VERSION="1.23.0+kidnyce.3"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.

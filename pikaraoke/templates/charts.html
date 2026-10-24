@@ -94,7 +94,7 @@
 				$(this).parent().addClass("is-active");
 				loadMostRequested();
 			});
-			$("#decade-select").on("change", function () { state.decade = $(this).val(); loadNumberOnes(false); });
+			$("#charts-decade").on("change", function () { state.decade = $(this).val(); loadNumberOnes(false); });
 			var timer = null;
 			$("#number-ones-search").on("input", function () {
 				var value = $(this).val();
@@ -126,8 +126,8 @@
 		padding: 18px 12px;
 		margin-bottom: 18px;
 		border-radius: 12px;
-		background: linear-gradient(135deg, #3a1c71, #d76d77 60%, #ffaf7b);
-		color: #fff;
+		background: linear-gradient(135deg, var(--kn-hero-a), var(--kn-hero-b) 60%, var(--kn-hero-c));
+		color: var(--kn-ink);
 	}
 	.hero-rank { font-size: 2.6rem; font-weight: 800; line-height: 1; }
 	.hero-title { font-size: 1.4rem; font-weight: 700; margin-top: 6px; overflow-wrap: anywhere; }
@@ -136,12 +136,12 @@
 	.bar-rank { width: 2em; text-align: right; font-weight: 700; flex-shrink: 0; }
 	.bar-body { flex: 1; min-width: 0; }
 	.bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.bar-track { height: 8px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
-	.bar-fill { height: 8px; background: #48c78e; border-radius: 4px; }
+	.bar-track { height: 8px; background: var(--kn-track); border-radius: 4px; }
+	.bar-fill { height: 8px; background: var(--kn-singer); border-radius: 4px; }
 	.bar-count { width: 2.5em; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 	.one-row {
 		display: flex; align-items: center; gap: 12px;
-		padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+		padding: 8px 0; border-bottom: 1px solid var(--kn-hairline);
 	}
 	.one-text { flex: 1; min-width: 0; }
 	.one-title { font-weight: 600; overflow-wrap: anywhere; }
@@ -170,7 +170,7 @@
 </p>
 <div class="charts-controls">
 	<div class="select">
-		<select id="decade-select" aria-label="{{ _('Decade') }}">
+		<select id="charts-decade" aria-label="{{ _('Decade') }}">
 			<option value="">{# MSG: Option to show every decade. #}{% trans %}All decades{% endtrans %}</option>
 			{% for decade in decades %}
 			<option value="{{ decade }}">{{ decade }}s</option>

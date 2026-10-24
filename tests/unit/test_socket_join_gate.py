@@ -19,6 +19,8 @@ def reset_state():
     socket_events.splash_connections.clear()
     socket_events.crowd_connections.clear()
     socket_events.guest_sids.clear()
+    socket_events.splash_liveness.clear()
+    socket_events.splash_last_playback.clear()
     socket_events.master_splash_id = None
 
 
@@ -84,14 +86,19 @@ def test_rotation_drops_guests_and_tells_only_the_screens():
 
 
 def test_a_crowd_screen_is_never_elected_master():
+    """The seat goes to a live beacon from a registered splash. The room screen
+    registers as a crowd screen, so even a beacon from it cannot take the seat."""
     app, socketio = make_app()
+    app.config["KARAOKE_INSTANCE"].playback_controller.playback_id = "p1"
     crowd = local_screen(app, socketio)
     crowd.emit("register_splash", "crowd")
+    crowd.emit("playback_position", 1.0, "p1")
     roles = [m["args"][0] for m in crowd.get_received() if m["name"] == "splash_role"]
     assert roles == ["slave"]
     assert socket_events.master_splash_id is None
 
     singer = local_screen(app, socketio)
     singer.emit("register_splash")
+    singer.emit("playback_position", 1.0, "p1")
     roles = [m["args"][0] for m in singer.get_received() if m["name"] == "splash_role"]
     assert roles == ["master"]

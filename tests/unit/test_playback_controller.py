@@ -7,6 +7,8 @@ import pytest
 from pikaraoke.lib.events import EventSystem
 from pikaraoke.lib.playback_controller import (
     OVERRUN_MARGIN_S,
+    START_WATCHDOG_HARD_S,
+    START_WATCHDOG_STALL_S,
     PlaybackController,
     PlaybackResult,
 )
@@ -109,11 +111,15 @@ class TestPlaybackControllerPlayFile:
         assert pc.now_playing_duration == 180
         assert pc.is_paused is False
 
+    @patch("pikaraoke.lib.playback_controller.time.monotonic")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     @patch("pikaraoke.lib.playback_controller.os.path.isfile", return_value=True)
     @patch("pikaraoke.lib.playback_controller.time.sleep")
     @patch("flask_babel._", side_effect=lambda x: x)
-    def test_play_file_timeout(self, mock_gettext, mock_sleep, mock_isfile, test_prefs):
-        """Test playback timeout when client never connects."""
+    def test_play_file_timeout(
+        self, mock_gettext, mock_sleep, mock_isfile, mock_delete, mock_monotonic, test_prefs
+    ):
+        """Test playback timeout when the client never confirms a start."""
         events = EventSystem()
         filename_fn = lambda x, remove_youtube_id=True: "Test Song"
 
@@ -128,6 +134,12 @@ class TestPlaybackControllerPlayFile:
         )
         pc.stream_manager.play_file = MagicMock(return_value=mock_result)
         pc.stream_manager.kill_ffmpeg = MagicMock()
+        pc.stream_manager.transcode_progress = MagicMock(return_value=None)
+
+        # The clock advances 1s per read so the start watchdog's stall cap is hit
+        # in a bounded number of loop iterations rather than real time.
+        clock = iter(range(0, 1000))
+        mock_monotonic.side_effect = lambda: next(clock)
 
         # Client never connects (is_playing stays False)
         result = pc.play_file("/songs/test.mp4", "TestUser", semitones=0)
@@ -289,7 +301,7 @@ class TestPlaybackControllerEndSong:
     """Tests for PlaybackController.end_song method."""
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     def test_end_song_cleans_up(self, mock_delete, mock_sleep, test_prefs):
         """Test that end_song cleans up resources."""
         events = EventSystem()
@@ -310,12 +322,13 @@ class TestPlaybackControllerEndSong:
         assert pc.is_playing is False
         assert pc.now_playing is None
         pc.stream_manager.kill_ffmpeg.assert_called_once()
-        mock_delete.assert_called_once()
+        # Only the ended stream's files are removed, not the whole directory.
+        mock_delete.assert_called_once_with(PLAYBACK_UID)
         mock_sleep.assert_called_once()
         assert emitted_reasons == [None]
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     def test_end_song_emits_reason(self, mock_delete, mock_sleep, test_prefs):
         """The end reason reaches listeners; play history derives 'completed' from it."""
         events = EventSystem()
@@ -333,7 +346,7 @@ class TestPlaybackControllerEndSong:
         assert emitted_reasons == ["complete"]
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     def test_song_ending_fires_before_cleanup_yields(self, mock_delete, mock_sleep, test_prefs):
         """The run loop can pick the next song the moment cleanup sleeps, so a
         listener counting turns must hear song_ending before that sleep."""
@@ -354,7 +367,7 @@ class TestPlaybackControllerEndSong:
         assert order == [("ending", "complete", False), ("sleep",), ("ended", "complete", False)]
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     def test_end_song_ignores_stale_playback_id(self, mock_delete, mock_sleep, test_prefs):
         """A player ending the previous song must not tear down its successor."""
         events = EventSystem()
@@ -374,7 +387,7 @@ class TestPlaybackControllerEndSong:
         mock_delete.assert_not_called()
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     def test_end_song_is_idempotent(self, mock_delete, mock_sleep, test_prefs):
         """A second end for an already-ended song is a no-op, not another teardown."""
         events = EventSystem()
@@ -397,7 +410,7 @@ class TestPlaybackControllerSkip:
     """Tests for PlaybackController.skip method."""
 
     @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("pikaraoke.lib.playback_controller.delete_stream_files")
     @patch("flask_babel._", side_effect=lambda x: x)
     def test_skip_when_playing(self, mock_gettext, mock_delete, mock_sleep, test_prefs):
         """Test skip when a song is playing."""
@@ -464,7 +477,7 @@ class TestPlaybackControllerPause:
 
 
 @patch("pikaraoke.lib.playback_controller.time.sleep")
-@patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+@patch("pikaraoke.lib.playback_controller.delete_stream_files")
 @patch("pikaraoke.lib.playback_controller.time.monotonic")
 class TestPlaybackControllerDeadline:
     """The server ends a song no player reported ending, once it has overrun."""
@@ -598,7 +611,7 @@ class TestPlaybackControllerResetNowPlaying:
     """Tests for PlaybackController.reset_now_playing method."""
 
     def test_reset_clears_all_state(self, test_prefs):
-        """Test that reset clears all now playing state."""
+        """Test that reset clears all state."""
         events = EventSystem()
         filename_fn = lambda x, remove_youtube_id=True: x
 
@@ -607,6 +620,7 @@ class TestPlaybackControllerResetNowPlaying:
         pc.now_playing_user = "TestUser"
         pc.is_playing = True
         pc.is_paused = False
+        pc.start_requested = True
 
         pc.reset_now_playing()
 
@@ -614,3 +628,104 @@ class TestPlaybackControllerResetNowPlaying:
         assert pc.now_playing_user is None
         assert pc.is_playing is False
         assert pc.is_paused is True
+        # A press during a song must not carry into the next one.
+        assert pc.start_requested is False
+
+
+@patch("pikaraoke.lib.playback_controller.time.sleep")
+@patch("pikaraoke.lib.playback_controller.time.monotonic")
+class TestPlaybackControllerStartWatchdog:
+    """play_file waits for a confirmed start, staying asleep while FFmpeg keeps
+    producing segments and giving up only on a stall or the hard cap."""
+
+    def _controller(self, test_prefs, progress=None):
+        pc = PlaybackController(test_prefs, EventSystem(), lambda x, remove_youtube_id=True: x)
+        pc.now_playing = "Test Song"
+        pc.playback_id = PLAYBACK_UID
+        pc.stream_manager.kill_ffmpeg = MagicMock()
+        if progress is not None:
+            pc.stream_manager.transcode_progress = MagicMock(side_effect=progress)
+        return pc
+
+    @staticmethod
+    def _progress(kind):
+        if kind == "healthy":
+            # A fresh (count, bytes) signature every tick: FFmpeg never stalls.
+            return [(i, i * 1000) for i in range(1, 5000)]
+        if kind == "stall_after_5":
+            values = [(i, i * 1000) for i in range(1, 6)]
+            return values + [values[-1]] * 4990
+        # "none" -> nothing to watch (no transcode, e.g. progressive passthrough)
+        return [None] * 5000
+
+    @staticmethod
+    def _clock(mock_monotonic):
+        # Advance 1s per read so the wait runs in bounded iterations, not real time.
+        values = iter(range(0, 1000))
+        mock_monotonic.side_effect = lambda: next(values)
+
+    def test_returns_true_when_the_start_is_already_confirmed(
+        self, mock_monotonic, mock_sleep, test_prefs
+    ):
+        pc = self._controller(test_prefs)
+        self._clock(mock_monotonic)
+        pc.is_playing = True
+
+        assert pc._wait_for_start() is True
+        # It bailed out on the first check and left no watchdog state behind.
+        assert pc._start_watchdog_started_at is None
+        assert pc._last_progress_sig is None
+
+    def test_keeps_waiting_past_the_stall_window_while_ffmpeg_progresses(
+        self, mock_monotonic, mock_sleep, test_prefs
+    ):
+        """A healthy transcode must not be cut at the stall window; the wait
+        only ends at the hard cap, long after the stall window has passed."""
+        pc = self._controller(test_prefs, self._progress("healthy"))
+        self._clock(mock_monotonic)
+
+        assert pc._wait_for_start() is False
+        # It ran to the hard cap, well past the stall window, because progress never stopped.
+        assert pc.stream_manager.transcode_progress.call_count >= START_WATCHDOG_HARD_S - 1
+
+    def test_gives_up_when_ffmpeg_stalls_before_the_hard_cap(
+        self, mock_monotonic, mock_sleep, test_prefs
+    ):
+        pc = self._controller(test_prefs, self._progress("stall_after_5"))
+        self._clock(mock_monotonic)
+
+        assert pc._wait_for_start() is False
+        # It bailed out at the stall window, well before the (much later) hard cap.
+        assert START_WATCHDOG_STALL_S < pc.stream_manager.transcode_progress.call_count
+        assert pc.stream_manager.transcode_progress.call_count < START_WATCHDOG_HARD_S
+
+    def test_gives_up_when_nothing_is_producing_and_no_start(
+        self, mock_monotonic, mock_sleep, test_prefs
+    ):
+        pc = self._controller(test_prefs, self._progress("none"))
+        self._clock(mock_monotonic)
+
+        assert pc._wait_for_start() is False
+
+    def test_a_confirmed_start_arms_the_end_deadline(self, mock_monotonic, mock_sleep, test_prefs):
+        """The client confirming a start is what arms the end-of-song deadline."""
+        pc = self._controller(test_prefs, self._progress("healthy"))
+        pc.now_playing_duration = 120
+        mock_monotonic.return_value = 100
+
+        pc.start_song(PLAYBACK_UID)
+
+        assert pc.is_playing is True
+        assert pc._deadline == 100 + 120 + OVERRUN_MARGIN_S
+
+
+class TestPlaybackControllerManualStart:
+    """Tests for the manual-start flag used when autoplay is off."""
+
+    def test_request_start_arms_flag(self, test_prefs):
+        """request_start sets the flag the run loop consumes."""
+        pc = PlaybackController(test_prefs, EventSystem(), lambda x, remove_youtube_id=True: x)
+
+        assert pc.start_requested is False
+        pc.request_start()
+        assert pc.start_requested is True

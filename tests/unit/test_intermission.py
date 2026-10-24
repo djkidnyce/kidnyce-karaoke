@@ -141,9 +141,10 @@ class TestIntermissionManager:
         events.emit("song_ending", "skip")
         assert manager.is_due()
 
-    def test_a_transpose_is_not_a_new_singer(self, manager, events):
+    @pytest.mark.parametrize("reason", ["transpose", "restart"])
+    def test_a_recue_is_not_a_new_singer(self, manager, events, reason):
         events.emit("song_ending", "complete")
-        events.emit("song_ending", "transpose")
+        events.emit("song_ending", reason)
         assert not manager.is_due()
 
     def test_disabled_means_never_due(self, manager, events, prefs):

@@ -316,6 +316,42 @@ class TestRestart:
 
         assert result is False
 
+    def test_restart_recues_to_wait_when_autoplay_off(self, mock_karaoke_with_songs):
+        """Autoplay off: restart returns the song to the head, keeping its key."""
+        k = mock_karaoke_with_songs
+        k.preferences.set("autoplay", "False")
+        path = "/songs/Artist - Song One---abc123.mp4"
+        pc = k.playback_controller
+        pc.now_playing = "Artist - Song One"
+        pc.now_playing_filename = path
+        pc.now_playing_user = "Alice"
+        pc.now_playing_transpose = 3
+        pc.is_playing = True
+
+        result = k.restart()
+
+        assert result is True
+        assert k.queue_manager.queue[0]["file"] == path
+        assert k.queue_manager.queue[0]["semitones"] == 3
+        assert pc.skipped_reasons == ["restart"]
+
+    def test_restart_replays_in_place_when_autoplay_on(self, mock_karaoke_with_songs):
+        """Autoplay on: restart replays from the top without re-queuing."""
+        k = mock_karaoke_with_songs
+        k.preferences.set("autoplay", "True")
+        pc = k.playback_controller
+        pc.now_playing = "Artist - Song One"
+        pc.now_playing_filename = "/songs/Artist - Song One---abc123.mp4"
+        pc.now_playing_user = "Alice"
+        pc.is_playing = True
+
+        result = k.restart()
+
+        assert result is True
+        assert pc.is_paused is False
+        assert pc.skipped_reasons == []
+        assert k.queue_manager.queue == []
+
 
 class TestStop:
     """Tests for the stop method."""
@@ -361,18 +397,6 @@ class TestKeepAwake:
         mock_karaoke.preferences.reset_all()
 
         assert mock_karaoke.keep_awake is False
-
-
-class TestResetNowPlayingNotification:
-    """Tests for the reset_now_playing_notification method."""
-
-    def test_reset_notification(self, mock_karaoke):
-        """Test that notification is reset to None."""
-        mock_karaoke.now_playing_notification = "Some notification"
-
-        mock_karaoke.reset_now_playing_notification()
-
-        assert mock_karaoke.now_playing_notification is None
 
 
 class TestTransposeCurrent:

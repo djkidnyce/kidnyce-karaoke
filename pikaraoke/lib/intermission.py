@@ -235,8 +235,8 @@ class IntermissionManager:
         events.on("song_ending", self._on_song_ending)
 
     def _on_song_ending(self, reason: str | None = None) -> None:
-        # A transpose restarts the same singer, so it is not a turn ending.
-        if reason != "transpose":
+        # A transpose or a restart re-cues the same singer, so it is not a turn ending.
+        if reason not in ("transpose", "restart"):
             self.singers_since_break += 1
 
     @property

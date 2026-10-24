@@ -35,6 +35,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=@@DATA_DIR@@
+# Nothing the app writes may run: a file write bug cannot become code execution.
+# This also keeps the app on the root owned yt-dlp that the weekly timer updates.
+NoExecPaths=@@DATA_DIR@@
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

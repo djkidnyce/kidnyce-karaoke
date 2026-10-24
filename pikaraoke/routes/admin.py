@@ -2,6 +2,7 @@
 
 import getpass
 import logging
+import math
 import shutil
 import subprocess
 import sys
@@ -82,8 +83,6 @@ def delayed_halt(k: Karaoke, steps: list[HostStep], refused: str = "") -> None:
     time.sleep(1.5)
     # all() stops at the first refusal, so a failed expand never reboots.
     if not all(_run_as_root(step) for step in steps):
-        # The announcement still holds the room's one notification slot.
-        k.reset_now_playing_notification()
         k.send_notification(refused, "danger")
         return
     k.queue_manager.queue_clear()
@@ -108,7 +107,7 @@ def update_ytdl():
     )
     th = threading.Thread(target=update_youtube_dl)
     th.start()
-    return redirect(url_for("info.info"))
+    return redirect(url_for("settings.settings"))
 
 
 def _announce_halt(message: str, steps: list[HostStep], refused: str = "") -> Response:
@@ -172,14 +171,24 @@ def expand_fs():
 @admin_bp.arguments(AuthForm, location="form")
 def auth(form):
     """Authenticate as admin from the browser form."""
-    if log_in(form["admin_password"]):
+    outcome = log_in(form["admin_password"])
+    if outcome.granted:
         # MSG: Message shown after logging in as admin successfully
         flash(_("Admin mode granted!"), "is-success")
+    elif outcome.throttled:
+        # MSG: Message shown after too many failed admin login attempts.
+        flash(
+            _(
+                "Too many attempts. Try again in %(seconds)d seconds.",
+                seconds=math.ceil(outcome.retry_after),
+            ),
+            "is-danger",
+        )
     else:
         # MSG: Message shown after failing to login as admin
         flash(_("Incorrect admin password!"), "is-danger")
-    # The login form only renders on the info page, so that is where login ends.
-    return redirect(url_for("info.info"))
+    # The login form only renders on the settings page, so that is where it ends.
+    return redirect(url_for("settings.settings"))
 
 
 @admin_bp.route("/admin_password", methods=["POST"])
@@ -198,7 +207,7 @@ def set_admin_password(form):
     else:
         # MSG: Message shown after clearing the admin password, making everyone an admin.
         flash(_("Admin password cleared. Everyone is an admin again."), "is-warning")
-    return redirect(url_for("info.info"))
+    return redirect(url_for("settings.settings"))
 
 
 @admin_bp.route("/logout", methods=["POST"])
@@ -210,4 +219,4 @@ def logout():
     session.pop("admin", None)
     # MSG: Message shown after logging out as admin successfully
     flash(_("Logged out of admin mode!"), "is-success")
-    return redirect(url_for("info.info"))
+    return redirect(url_for("settings.settings"))
