@@ -390,6 +390,43 @@ class TestStaleSessionRollover:
         assert len(history.get_sessions(include_unnamed=True)) == 1
 
 
+class TestEndStaleSession:
+    """Closing last night's session ahead of the next play, so the join code turns over early."""
+
+    _make_stale = staticmethod(TestStaleSessionRollover._make_stale)
+
+    def test_an_idle_night_is_closed_and_announced(self, db, history, events, song_id):
+        history.record_play(song_id, None, "Alice", "A Song")
+        events.emit("song_ended", "complete")
+        self._make_stale(db)
+        heard = []
+        events.on("session_changed", lambda: heard.append(True))
+
+        assert history.end_stale_session() is True
+        assert history.get_current_session() is None
+        assert heard == [True]
+
+    def test_a_recent_session_stays_open(self, history, events, song_id):
+        history.record_play(song_id, None, "Alice", "A Song")
+        heard = []
+        events.on("session_changed", lambda: heard.append(True))
+
+        assert history.end_stale_session() is False
+        assert history.get_current_session() is not None
+        assert heard == []
+
+    def test_a_named_session_stays_open(self, db, history, song_id):
+        history.start_session("Friday")
+        history.record_play(song_id, None, "Alice", "A Song")
+        self._make_stale(db, hours=24 * 7)
+
+        assert history.end_stale_session() is False
+        assert history.get_current_session()["name"] == "Friday"
+
+    def test_nothing_open(self, history):
+        assert history.end_stale_session() is False
+
+
 class TestCompleted:
     def test_still_playing_before_song_ends(self, history, song_id):
         """has_ended is what the log renders as "Playing" rather than "Skipped"."""

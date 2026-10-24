@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# X session for the two karaoke screens. Started by startx from the kiosk
-# user's login on tty1, so a crash drops back to getty, which logs in and starts
-# it again.
+# X session for the karaoke screens. Started by startx from the kiosk user's
+# login on tty1, so a crash drops back to getty, which logs in and starts it
+# again.
 #
-#   Singer screen (default HDMI-1, the micro HDMI port next to USB-C):
-#     the lyrics video, the player's audio, who is next. No QR code.
-#   Crowd screen (default HDMI-2): QR code with the join code, the singing
-#     order, and a muted copy of the lyrics video so the room can sing along.
+# Every few seconds it tells the app which ports X sees connected and asks
+# which page goes on which port. The host picks the setup in Settings, Screens:
 #
-# With one screen plugged in, it shows the normal splash page, QR code included.
+#   Two screens: the singer screen (lyrics video, the player's sound, who is
+#     next, no QR code) and the room screen (QR code with the join code, the
+#     singing order, a muted copy of the lyrics video to sing along).
+#   One screen for everything: lyrics, QR code, join code and singing order.
+#   Auto detect: two screens when two TVs are plugged in and the board has the
+#     memory for both, else one.
+#
+# Plugging a TV in or out, or changing the setting, relaunches the windows.
 set -uo pipefail
 
 CONFIG=${KIDNYCE_KIOSK_CONFIG:-/etc/kidnyce-karaoke/kiosk.env}
@@ -16,11 +21,9 @@ CONFIG=${KIDNYCE_KIOSK_CONFIG:-/etc/kidnyce-karaoke/kiosk.env}
 [[ -f "$CONFIG" ]] && source "$CONFIG"
 
 APP_URL=${APP_URL:-http://127.0.0.1:5555}
-SINGER_OUTPUT=${SINGER_OUTPUT:-HDMI-1}
-CROWD_OUTPUT=${CROWD_OUTPUT:-HDMI-2}
 DISPLAY_MODE=${DISPLAY_MODE:-1920x1080}
 AUDIO_OUT=${AUDIO_OUT:-hdmi-singer}
-SWAP_SCREENS=${SWAP_SCREENS:-0}
+POLL_SECONDS=${POLL_SECONDS:-5}
 PROFILE_ROOT=${PROFILE_ROOT:-$HOME/.config/kidnyce-kiosk}
 LOG=${KIOSK_LOG:-$HOME/kiosk.log}
 
@@ -52,18 +55,28 @@ set_mode() {
     fi
 }
 
-# ALSA device for the player's sound. vc4 HDMI needs the "hdmi:" PCM, which
-# formats IEC958 frames; plughw on it fails.
+# ALSA card behind an HDMI port on a Pi: X's HDMI-1 is the board's HDMI0.
+hdmi_card() {
+    case "$1" in
+        HDMI-1) echo vc4hdmi0 ;;
+        HDMI-2) echo vc4hdmi1 ;;
+    esac
+}
+
+# ALSA device for the player's sound, given the port of the screen that plays
+# it and the port of the room screen (empty with one screen). vc4 HDMI needs the
+# "hdmi:" PCM, which formats IEC958 frames; plughw on it fails.
 alsa_device() {
-    local singer_card crowd_card
-    if [[ $SINGER_OUTPUT == "HDMI-2" ]]; then singer_card=vc4hdmi1; else singer_card=vc4hdmi0; fi
-    if [[ $CROWD_OUTPUT == "HDMI-1" ]]; then crowd_card=vc4hdmi0; else crowd_card=vc4hdmi1; fi
+    local sound_output=$1 crowd_output=$2 port card
     case "$AUDIO_OUT" in
-        hdmi-singer) echo "hdmi:CARD=$singer_card,DEV=0" ;;
-        hdmi-crowd) echo "hdmi:CARD=$crowd_card,DEV=0" ;;
+        hdmi-singer | hdmi-crowd)
+            port=$sound_output
+            [[ $AUDIO_OUT == hdmi-crowd && -n $crowd_output ]] && port=$crowd_output
+            card=$(hdmi_card "$port")
+            if [[ -n $card ]]; then echo "hdmi:CARD=$card,DEV=0"; else echo "default"; fi
+            ;;
         headphones) echo "plughw:CARD=Headphones,DEV=0" ;;
         usb)
-            local card
             for card in /proc/asound/card*; do
                 if [[ -f "$card/usbid" ]]; then
                     echo "plughw:CARD=$(<"$card/id"),DEV=0"
@@ -122,49 +135,65 @@ launch() {
     log "started $name screen at ${w}x${h}+${x}+${y}: $url"
 }
 
-layout_and_launch() {
-    local outputs singer crowd
-    outputs=$(connected_outputs)
-    singer=$SINGER_OUTPUT
-    crowd=$CROWD_OUTPUT
-    if [[ $SWAP_SCREENS == 1 ]]; then
-        singer=$CROWD_OUTPUT
-        crowd=$SINGER_OUTPUT
-    fi
-    local have_singer=0 have_crowd=0
-    grep -qx "$singer" <<<"$outputs" && have_singer=1
-    grep -qx "$crowd" <<<"$outputs" && have_crowd=1
+# The app's plan for these ports, one "role output path" line per screen.
+# Fails when the app does not answer.
+fetch_layout() {
+    curl --silent --fail --max-time 3 --get \
+        --data-urlencode "connected=$(paste -sd, - <<<"$1")" \
+        "$APP_URL/api/display/layout" | jq -r '.screens[] | "\(.role) \(.output) \(.path)"'
+}
 
-    if ((have_singer == 0 && have_crowd == 1)); then
-        # Only one screen, on the other port: use it as the single screen.
-        singer=$crowd
-        have_singer=1
-        have_crowd=0
-    fi
-    if ((have_singer == 0)); then
-        log "no screen connected (outputs: ${outputs:-none}), waiting"
-        return 1
-    fi
+# Until the app has answered once: everything on the first port.
+fallback_layout() {
+    local first
+    first=$(head -n 1 <<<"$1")
+    [[ -n $first ]] && echo "all $first /splash?all=1"
+}
 
-    set_mode "$singer" --pos 0x0 --primary
-    if ((have_crowd)); then
-        set_mode "$crowd" --right-of "$singer"
-    fi
+# Turn the ports on, place one Chromium per screen, turn unused ports off.
+apply_layout() {
+    local plan=$1 outputs=$2 role output path previous="" sound="" crowd=""
+    local -a roles=() ports=() paths=()
+    while read -r role output path; do
+        [[ $role =~ ^(singer|crowd|all)$ && $path =~ ^/[A-Za-z0-9/?=\&_.-]*$ ]] || continue
+        grep -qxF -- "$output" <<<"$outputs" || continue
+        roles+=("$role") ports+=("$output") paths+=("$path")
+    done <<<"$plan"
+    ((${#roles[@]})) || return 1
+
+    while read -r output; do
+        [[ -z $output ]] && continue
+        if [[ " ${ports[*]} " != *" $output "* ]]; then
+            xrandr --output "$output" --off
+            log "$output: TV plugged in but not used, turned off"
+        fi
+    done <<<"$outputs"
+
+    local i
+    for i in "${!roles[@]}"; do
+        if [[ -z $previous ]]; then
+            set_mode "${ports[i]}" --pos 0x0 --primary
+        else
+            set_mode "${ports[i]}" --right-of "$previous"
+        fi
+        previous=${ports[i]}
+        [[ ${roles[i]} == crowd ]] && crowd=${ports[i]}
+        [[ ${roles[i]} != crowd ]] && sound=${ports[i]}
+    done
 
     local device
-    device=$(alsa_device)
+    device=$(alsa_device "$sound" "$crowd")
     local -a audio_flags=()
-    if [[ $device != pulse ]]; then
-        audio_flags=(--alsa-output-device="$device")
-    fi
+    [[ $device != pulse ]] && audio_flags=(--alsa-output-device="$device")
 
-    if ((have_crowd)); then
-        launch singer "$(geometry_of "$singer")" "$APP_URL/splash?singer=1" "${audio_flags[@]}"
-        launch crowd "$(geometry_of "$crowd")" "$APP_URL/crowd" --mute-audio
-    else
-        launch singer "$(geometry_of "$singer")" "$APP_URL/splash" "${audio_flags[@]}"
-    fi
-    LAYOUT="$outputs"
+    for i in "${!roles[@]}"; do
+        if [[ ${roles[i]} == crowd ]]; then
+            launch crowd "$(geometry_of "${ports[i]}")" "$APP_URL${paths[i]}" --mute-audio
+        else
+            launch "${roles[i]}" "$(geometry_of "${ports[i]}")" "$APP_URL${paths[i]}" "${audio_flags[@]}"
+        fi
+    done
+    log "layout: $(tr '\n' ' ' <<<"$plan")(sound: $device)"
 }
 
 stop_all() {
@@ -177,7 +206,6 @@ stop_all() {
 main() {
     BROWSER=$(browser_bin) || { log "chromium is not installed"; exit 1; }
     declare -gA PIDS=()
-    LAYOUT=""
 
     # Never blank, never sleep.
     xset s off s noblank -dpms 2>/dev/null
@@ -191,22 +219,30 @@ main() {
     wait_for_app
     trap 'stop_all; exit 0' TERM INT
 
+    local now plan current_plan="" current_outputs="" name dead
     while true; do
-        if [[ -z $LAYOUT ]]; then
-            layout_and_launch || { sleep 5; continue; }
-        fi
-        sleep 5
-        # Restart on hotplug, or when either browser has died.
-        local now name dead=0
         now=$(connected_outputs)
+        if ! plan=$(fetch_layout "$now"); then
+            # App restarting: keep what is on screen. Never answered yet: show something.
+            if [[ -n $current_plan ]]; then plan=$current_plan; else plan=$(fallback_layout "$now"); fi
+        fi
+        dead=0
         for name in "${!PIDS[@]}"; do
             kill -0 "${PIDS[$name]}" 2>/dev/null || dead=1
         done
-        if [[ $now != "$LAYOUT" || $dead == 1 ]]; then
-            log "screens changed or a browser exited, relaunching"
-            stop_all
-            LAYOUT=""
+        if [[ $plan != "$current_plan" || $now != "$current_outputs" || $dead == 1 ]]; then
+            if ((${#PIDS[@]})); then
+                log "screens changed, setting changed or a browser exited: relaunching"
+                stop_all
+            fi
+            current_plan="" current_outputs=$now
+            if [[ -n $plan ]] && apply_layout "$plan" "$now"; then
+                current_plan=$plan
+            else
+                log "no screen to show on (outputs: $(paste -sd, - <<<"${now:-none}")), waiting"
+            fi
         fi
+        sleep "$POLL_SECONDS"
     done
 }
 

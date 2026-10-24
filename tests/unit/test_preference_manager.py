@@ -300,6 +300,9 @@ def test_preference_manager_defaults_exist():
         "intermission_every",
         "intermission_volume",
         "intermission_fill",
+        "screen_mode",
+        "single_screen_output",
+        "swap_screens",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

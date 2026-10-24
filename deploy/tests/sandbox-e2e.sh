@@ -23,9 +23,14 @@ fail() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$*"; }
 check() { local name=$1; shift; if "$@"; then pass "$name"; else fail "$name"; fi; }
 
 cleanup() {
+    # The background jobs are subshells, so kill what they started as well, or
+    # the next run's Pebble cannot bind and talks to this run's instead.
     [[ -n ${APP_PID:-} ]] && kill "$APP_PID" 2>/dev/null
     [[ -n ${PEBBLE_PID:-} ]] && kill "$PEBBLE_PID" 2>/dev/null
     [[ -n ${DNS_PID:-} ]] && kill "$DNS_PID" 2>/dev/null
+    pkill -x pebble 2>/dev/null || true
+    pkill -x pebble-challtestsrv 2>/dev/null || true
+    pkill -f "^${PREFIX:-/opt/kidnyce-karaoke}/venv/bin/python" 2>/dev/null || true
     nginx -s stop 2>/dev/null || true
     sed -i '/# kidnyce-e2e$/d' /etc/hosts
 }
@@ -47,6 +52,9 @@ jq --arg c "$WORK/acme.pem" --arg k "$WORK/acme.key" '.pebble.certificate = $c |
 ACME_CA="$WORK/acme-ca.pem"
 
 echo "== Starting Pebble and its DNS test server"
+pkill -x pebble 2>/dev/null || true
+pkill -x pebble-challtestsrv 2>/dev/null || true
+sleep 1
 pebble-challtestsrv -defaultIPv4 127.0.0.1 -defaultIPv6 "" -dns01 :8053 -http01 "" -https01 "" \
     -tlsalpn01 "" -doh "" -management :8055 >"$WORK/challtestsrv.log" 2>&1 &
 DNS_PID=$!
@@ -140,6 +148,9 @@ check "joined guest can call the API" bash -c "curl -s -b '$jar' -o /dev/null -w
 check "crowd screen state hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/api/display/state | grep -qx 404"
 check "crowd page hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/crowd | grep -qx 404"
 check "crowd page served to the Pi itself" bash -c "curl -fs http://127.0.0.1:$PORT/crowd | grep -q crowd.js"
+check "screen layout hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} '$U/api/display/layout?connected=HDMI-9' | grep -qx 404"
+check "screen hardware is host only" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/api/display/hardware | grep -qx 403"
+check "the Pi gets its screen layout" bash -c "curl -fs 'http://127.0.0.1:$PORT/api/display/layout?connected=HDMI-1,HDMI-2' | jq -e '.signature == \"singer=HDMI-1 crowd=HDMI-2\"' >/dev/null"
 check "charts page loads" bash -c "curl -s -b '$jar' ${H[*]} $U/charts | grep -q 'Number 1 hits'"
 check "number ones API" bash -c "curl -s -b '$jar' ${H[*]} '$U/api/charts/number_ones?q=hey%20jude' | jq -e '.songs[0].artist == \"The Beatles\"' >/dev/null"
 
@@ -227,12 +238,18 @@ echo "== Renewal"
 # A real forced renewal against Pebble (a dry run would switch to Let's Encrypt
 # staging). Proves the saved renewal config, DNS hooks and key settings work.
 SERIAL_BEFORE=$(openssl x509 -in "$CERT" -noout -serial)
-env REQUESTS_CA_BUNDLE="$ACME_CA" certbot renew --force-renewal --cert-name kidnyce-karaoke -q || true
+env REQUESTS_CA_BUNDLE="$ACME_CA" certbot renew --force-renewal --no-random-sleep-on-renew --cert-name kidnyce-karaoke -q || true
 check "certbot renews with the saved settings" test "$(openssl x509 -in "$CERT" -noout -serial)" != "$SERIAL_BEFORE"
 check "renewed key is still ECDSA" bash -c "openssl x509 -in '$CERT' -noout -text | grep -q id-ecPublicKey"
 check "renewal config keeps the reload hook" grep -q "renew_hook = systemctl reload nginx" /etc/letsencrypt/renewal/kidnyce-karaoke.conf
 
 echo "== Firewall rules load"
+check "kidnyce-karaoke screens shows the board" bash -c "kidnyce-karaoke screens | grep -q '^Board:'"
+check "kidnyce-karaoke screens single switches" bash -c "kidnyce-karaoke screens single | grep -q 'Setup:  single'"
+check "kidnyce-karaoke screens swap on" bash -c "kidnyce-karaoke screens swap on | grep -q 'swap: on'"
+kidnyce-karaoke screens auto >/dev/null
+kidnyce-karaoke screens swap off >/dev/null
+
 check "nftables table loads and unloads" bash -c "nft -f /etc/kidnyce-karaoke/firewall.nft && nft list table inet kidnyce_fw >/dev/null && nft delete table inet kidnyce_fw"
 
 echo "== Idempotent re-run"
@@ -240,7 +257,21 @@ check "second install run succeeds and keeps the password" bash -c "
     '$ROOT/deploy/install-pi.sh' --yes --skip-hw-check --no-kiosk --no-ddns --dns-provider hook \
         --dns-auth-hook '$WORK/auth-hook' --dns-cleanup-hook '$WORK/cleanup-hook' \
         --acme-server https://127.0.0.1:14000/dir --acme-ca-bundle '$ACME_CA' \
+        --screens dual \
         3>/dev/null >'$WORK/install2.out' 2>&1 && test \"\$(cat /etc/kidnyce-karaoke/admin-password)\" = '$PW'"
+check "installer --screens dual reaches the app" bash -c "kidnyce-karaoke screens | grep -q 'Setup:  dual'"
+kidnyce-karaoke screens auto >/dev/null
+
+echo "== Screens on Xorg with virtual outputs"
+if [[ -n ${CHROME:-} ]] && command -v Xorg >/dev/null && [[ -f /usr/lib/xorg/modules/drivers/dummy_drv.so ]]; then
+    if "$HERE/kiosk-xdummy-test.sh" | tee "$WORK/kiosk.out"; then
+        pass "kiosk screens ($(grep -c '  PASS' "$WORK/kiosk.out") passed)"
+    else
+        fail "kiosk screens: $(grep '  FAIL' "$WORK/kiosk.out" | tr '\n' ';')"
+    fi
+else
+    echo "  (skipped: needs CHROME and Xorg with the dummy driver)"
+fi
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

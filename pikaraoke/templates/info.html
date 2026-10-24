@@ -477,6 +477,170 @@
 		<div class="card">
 			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
 				<div class="media-content">
+					{# MSG: Title of the settings section for the TVs plugged into the Pi. #}
+					<h3 class="mb-0">{% trans %}Screens{% endtrans %}</h3>
+				</div>
+			</header>
+			<div class="card-content collapsible-content">
+				<div class="content">
+					<p id="screens-board" class="is-size-7"></p>
+					<div class="field">
+						{# MSG: Label for the choice between one screen and two. #}
+						<label class="label" for="pref-screen-mode">{% trans %}Screen setup{% endtrans %}</label>
+						<div class="select">
+							<select id="pref-screen-mode">
+								{# MSG: Screen setup option that picks one or two screens from what is plugged in. #}
+								<option value="auto" {% if screen_mode not in ('single', 'dual') %}selected{% endif %}>{% trans %}Auto detect: two screens when two TVs are plugged in{% endtrans %}</option>
+								{# MSG: Screen setup option that puts lyrics, QR code and singing order on one TV. #}
+								<option value="single" {% if screen_mode == 'single' %}selected{% endif %}>{% trans %}One screen for everything{% endtrans %}</option>
+								{# MSG: Screen setup option with lyrics on one TV and QR code and order on the other. #}
+								<option value="dual" {% if screen_mode == 'dual' %}selected{% endif %}>{% trans %}Two screens: singer and room{% endtrans %}</option>
+							</select>
+						</div>
+					</div>
+					<div id="screens-single-field" class="field">
+						{# MSG: Label for which port the one screen setup uses. #}
+						<label class="label" for="pref-single-output">{% trans %}Port for one screen{% endtrans %}</label>
+						<div class="select">
+							<select id="pref-single-output">
+								{# MSG: Port option: whichever TV is plugged in first. #}
+								<option value="auto">{% trans %}First one plugged in{% endtrans %}</option>
+							</select>
+						</div>
+					</div>
+					<div id="screens-swap-field" class="user-preference-container">
+						<input id="pref-swap-screens" class="checkbox" type="checkbox" {% if swap_screens == True %}checked{% endif %} />
+						<label class="label" for="pref-swap-screens">{# MSG: Checkbox that swaps which TV is the singer screen. #} {% trans %}Swap the singer and room screens{% endtrans %}</label>
+					</div>
+					<table id="screens-ports" class="table is-narrow is-size-7">
+						<thead>
+							<tr>
+								{# MSG: Table heading: the port on the Pi. #}
+								<th>{% trans %}Port{% endtrans %}</th>
+								{# MSG: Table heading: the TV plugged into the port. #}
+								<th>{% trans %}TV{% endtrans %}</th>
+								{# MSG: Table heading: what that TV shows. #}
+								<th>{% trans %}Showing{% endtrans %}</th>
+							</tr>
+						</thead>
+						<tbody></tbody>
+					</table>
+					<p id="screens-now" class="is-size-7"></p>
+					<p id="screens-session" class="is-size-7 has-text-grey"></p>
+					{# MSG: Button that checks the board and ports again. #}
+					<button id="screens-detect" class="button is-small" type="button">{% trans %}Detect again{% endtrans %}</button>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			(function () {
+				var hardwareUrl = "{{ url_for('display.hardware') }}";
+				var changeUrl = "{{ url_for('preferences.change_preferences') }}";
+				var t = {
+					// {# MSG: Board summary. {model} is the board name, {memory} gigabytes of RAM. #}
+					board: {{ _('{model}, {memory} GB RAM.') | tojson }},
+					// {# MSG: Shown when the board has two or more display ports. #}
+					dualCapable: {{ _('Two screens supported.') | tojson }},
+					// {# MSG: Shown when the board has one display port. #}
+					singleOnly: {{ _('One display port, so one screen shows everything.') | tojson }},
+					// {# MSG: Shown when no display ports could be read. #}
+					noPorts: {{ _('No display ports found yet.') | tojson }},
+					// {# MSG: What a TV shows: the singer screen with lyrics and sound. #}
+					singer: {{ _('Singer: lyrics and sound') | tojson }},
+					// {# MSG: What a TV shows: the room screen. #}
+					crowd: {{ _('Room: QR code, order, lyrics') | tojson }},
+					// {# MSG: What a TV shows in the one screen setup. #}
+					all: {{ _('Everything') | tojson }},
+					// {# MSG: A TV is plugged in but not used. #}
+					unused: {{ _('Off') | tojson }},
+					// {# MSG: Nothing is plugged into this port. #}
+					empty: {{ _('Nothing plugged in') | tojson }},
+					// {# MSG: A TV whose name could not be read. #}
+					unnamedTv: {{ _('TV') | tojson }},
+					notes: {
+						// {# MSG: Layout note. {singer} and {crowd} are port names. #}
+						dual: {{ _('Two screens: the singer on {singer}, the room on {crowd}.') | tojson }},
+						// {# MSG: Layout note when two screens run on a board with little memory. #}
+						dual_low_memory: {{ _('Two screens, as chosen. This board has under 4 GB of RAM, so video may stutter.') | tojson }},
+						// {# MSG: Layout note. {port} is a port name. #}
+						single_chosen: {{ _('One screen for everything on {port}, as chosen.') | tojson }},
+						// {# MSG: Layout note. {port} is a port name. #}
+						one_connected: {{ _('One TV is plugged in ({port}), so it shows everything. Plug in a second TV for two screens.') | tojson }},
+						// {# MSG: Layout note. {port} is a port name. #}
+						dual_needs_two: {{ _('Two screens are chosen but only {port} has a TV. It shows everything until a second TV is plugged in.') | tojson }},
+						// {# MSG: Layout note. {port} is a port name. #}
+						low_memory: {{ _('Two TVs are plugged in, but this board has under 4 GB of RAM, so {port} shows everything. Choose Two screens to use both anyway.') | tojson }},
+						// {# MSG: Layout note when no TV is plugged in. #}
+						none_connected: {{ _('No TV is plugged in.') | tojson }}
+					},
+					// {# MSG: Screen session status. {seconds} is a number. #}
+					running: {{ _('The screens checked in {seconds} s ago. Changes reach them within 5 seconds.') | tojson }},
+					// {# MSG: Shown when the kiosk screens are not running on this machine. #}
+					notRunning: {{ _('The screens are not running on this machine. This is what they would show.') | tojson }}
+				};
+				var lastPorts = [];
+				function portLabel(output) {
+					var port = lastPorts.find(function (p) { return p.output === output; });
+					return port ? port.label : output;
+				}
+				function render(h) {
+					lastPorts = h.ports;
+					var board = t.board.replace("{model}", h.board.model).replace("{memory}", h.board.memory_gb);
+					var ports = h.ports.length ? (h.dual_capable ? t.dualCapable : t.singleOnly) : t.noPorts;
+					$("#screens-board").text(board + " " + ports);
+					$("#pref-screen-mode").val(h.settings.screen_mode);
+					$("#pref-screen-mode option[value=dual]").prop("disabled", h.ports.length > 0 && !h.dual_capable);
+					$("#pref-swap-screens").prop("checked", h.settings.swap_screens === true);
+
+					var $single = $("#pref-single-output");
+					$single.find("option:not([value=auto])").remove();
+					h.ports.forEach(function (p) { $single.append($("<option>").val(p.output).text(p.label)); });
+					$single.val(h.ports.some(function (p) { return p.output === h.settings.single_screen_output; }) ? h.settings.single_screen_output : "auto");
+					$("#screens-single-field").toggle(h.settings.screen_mode !== "dual");
+					$("#screens-swap-field").toggle(h.settings.screen_mode !== "single");
+
+					var $rows = $("#screens-ports tbody").empty();
+					h.ports.forEach(function (p) {
+						var tv = p.connected ? (p.monitor || t.unnamedTv) + (p.preferred_mode ? " (" + p.preferred_mode + ")" : "") : "";
+						var showing = p.role ? t[p.role] : (p.connected ? t.unused : t.empty);
+						$rows.append($("<tr>").append($("<td>").text(p.label), $("<td>").text(tv), $("<td>").text(showing)));
+					});
+					$("#screens-ports").toggle(h.ports.length > 0);
+
+					var screens = h.layout.screens;
+					var note = t.notes[h.layout.note] || "";
+					note = note.replace("{port}", screens.length ? portLabel(screens[0].output) : "")
+						.replace("{singer}", screens.length > 1 ? portLabel(screens[0].output) : "")
+						.replace("{crowd}", screens.length > 1 ? portLabel(screens[1].output) : "");
+					$("#screens-now").text(note);
+					$("#screens-session").text(h.screens_running ? t.running.replace("{seconds}", h.seconds_since_report) : t.notRunning);
+				}
+				function refresh() {
+					return $.getJSON(hardwareUrl).done(render);
+				}
+				function save(pref, val) {
+					$.post(changeUrl, { pref: pref, val: val }).done(function (data) {
+						showNotification(data[1], data[0] ? "is-success" : "is-danger");
+						refresh();
+						// The screens pick the change up on their next check.
+						setTimeout(refresh, 6000);
+					});
+				}
+				$("#pref-screen-mode").on("change", function () { save("screen_mode", $(this).val()); });
+				$("#pref-single-output").on("change", function () { save("single_screen_output", $(this).val()); });
+				$("#pref-swap-screens").on("click", function () { save("swap_screens", $(this).is(":checked") ? "True" : "False"); });
+				$("#screens-detect").on("click", function () {
+					var $b = $(this).addClass("is-loading");
+					refresh().always(function () { $b.removeClass("is-loading"); });
+				});
+				refresh();
+			})();
+		</script>
+
+		<div class="card">
+			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
+				<div class="media-content">
 					{# MSG: Title of the settings section for break music between singers. #}
 					<h3 class="mb-0">{% trans %}Intermission (break music){% endtrans %}</h3>
 				</div>

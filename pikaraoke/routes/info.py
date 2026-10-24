@@ -111,6 +111,8 @@ def info():
         intermission_volume=int(k.intermission_volume * 100),
         intermission_fill=k.intermission_fill,
         intermission_music_path=k.get_intermission_music_path(),
+        screen_mode=k.preferences.get_or_default("screen_mode"),
+        swap_screens=k.preferences.get_or_default("swap_screens"),
     )
 
 

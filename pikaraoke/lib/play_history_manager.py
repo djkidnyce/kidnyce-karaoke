@@ -253,6 +253,22 @@ class PlayHistoryManager:
             # listeners see one move rather than a close and an open.
             self._session_cached = False
 
+    def end_stale_session(self) -> bool:
+        """Close an abandoned session the first song opened, now instead of at the next play.
+
+        Kid Nyce: the join code belongs to the session, so a rollover at the
+        first song of the next night would issue a new code and lock out every
+        phone that joined before that song. Run at startup and while idle, the
+        code turns over between nights, before anyone scans it.
+        """
+        if self.get_current_session() is None:
+            return False
+        self._roll_over_stale_session()
+        if self.get_current_session() is not None:
+            return False
+        self._announce_session_change()
+        return True
+
     def start_session(self, name: str | None = None) -> str:
         """Start a session and return its UUID.
 

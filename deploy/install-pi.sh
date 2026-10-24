@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Kid Nyce Karaoke installer for a Raspberry Pi 4B (4 GB or 8 GB) running
-# Raspberry Pi OS 64 bit, Lite or Desktop, Bookworm (Debian 12) or Trixie (Debian 13).
+# Kid Nyce Karaoke installer for a Raspberry Pi running Raspberry Pi OS 64 bit,
+# Lite or Desktop, Bookworm (Debian 12) or Trixie (Debian 13). Built for a Pi 4B
+# with 4 GB or 8 GB and two TVs; a Pi 5 or Pi 400 works the same, and a Pi 3 or
+# a 2 GB board runs one screen for everything.
 #
 # What it sets up, in order:
 #   1. System packages (ffmpeg, Nginx, Certbot, nftables, X and Chromium for the screens)
@@ -12,7 +14,8 @@
 #   6. Nginx in front with TLS, security headers and rate limits
 #   7. A Cloudflare DNS record kept pointed at this Pi's LAN address
 #   8. An nftables firewall: HTTPS and SSH from private networks only
-#   9. Two kiosk screens: singer on HDMI 0, crowd on HDMI 1
+#   9. The kiosk screens: two (singer and room) when two TVs are plugged in,
+#      else one for everything. The host can choose in Settings, Screens.
 #
 # Run it again any time: it is idempotent and keeps your songs, settings,
 # certificate and admin password.
@@ -23,8 +26,8 @@
 # See deploy/README.md for every option and the Cloudflare token setup.
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.0.0"
-APP_VERSION="1.23.0+kidnyce.1"
+INSTALLER_VERSION="1.1.0"
+APP_VERSION="1.23.0+kidnyce.2"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -50,8 +53,8 @@ ADMIN_PASSWORD_FILE=""
 RESET_ADMIN_PASSWORD=0
 KIOSK=1
 KIOSK_USER="kiosk"
-SINGER_OUTPUT="HDMI-1"
-CROWD_OUTPUT="HDMI-2"
+SCREENS=""
+SWAP_SCREENS=0
 DISPLAY_MODE="1920x1080"
 AUDIO_OUT="hdmi-singer"
 FORCE_HDMI=0
@@ -106,11 +109,12 @@ Options:
   --staging                Use the Let's Encrypt staging CA (untrusted certs, for trial runs)
   --admin-password-file P  Use this admin password instead of generating one
   --reset-admin-password   Generate a new admin password even if one exists
-  --no-kiosk               Do not set up the two HDMI screens
+  --no-kiosk               Do not set up the HDMI screens
   --kiosk-user NAME        Login that runs the screens (default: $KIOSK_USER)
-  --singer-output NAME     X output for the singer screen (default: $SINGER_OUTPUT, the port by USB-C)
-  --crowd-output NAME      X output for the crowd screen (default: $CROWD_OUTPUT)
-  --display-mode WxH       Resolution for both screens (default: $DISPLAY_MODE)
+  --screens MODE           auto (default: two screens when two TVs are plugged in),
+                           single (one screen for everything) or dual. Also in Settings.
+  --swap-screens           Singer screen on HDMI1 and room screen on HDMI0
+  --display-mode WxH       Resolution for the screens (default: $DISPLAY_MODE)
   --audio OUT              hdmi-singer (default), hdmi-crowd, headphones, usb, pulse or an ALSA PCM
   --force-hdmi             Keep both HDMI outputs on even if a TV is off at boot (edits cmdline.txt)
   --no-firewall            Do not install the nftables firewall
@@ -118,7 +122,7 @@ Options:
   --port N                 Loopback port for the app (default: $PORT)
   --yes                    Do not ask questions
   --dry-run                Show what would happen and change nothing
-  --skip-hw-check          Allow hardware other than a Pi 4 (testing only)
+  --skip-hw-check          Allow hardware other than a Raspberry Pi (testing only)
   --no-start               Configure everything but start nothing (image builds, testing)
   --acme-server URL        Alternate ACME directory (testing only)
   --acme-ca-bundle FILE    CA bundle for that ACME server (testing only)
@@ -142,8 +146,8 @@ while [[ $# -gt 0 ]]; do
         --reset-admin-password) RESET_ADMIN_PASSWORD=1 ;;
         --no-kiosk) KIOSK=0 ;;
         --kiosk-user) KIOSK_USER=$2; shift ;;
-        --singer-output) SINGER_OUTPUT=$2; shift ;;
-        --crowd-output) CROWD_OUTPUT=$2; shift ;;
+        --screens) SCREENS=$2; shift ;;
+        --swap-screens) SWAP_SCREENS=1 ;;
         --display-mode) DISPLAY_MODE=$2; shift ;;
         --audio) AUDIO_OUT=$2; shift ;;
         --force-hdmi) FORCE_HDMI=1 ;;
@@ -242,6 +246,7 @@ preflight() {
     fi
     [[ $DISPLAY_MODE =~ ^[0-9]+x[0-9]+$ ]] || die "--display-mode must look like 1920x1080"
     [[ $KIOSK_USER =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "invalid --kiosk-user"
+    [[ -z $SCREENS || $SCREENS =~ ^(auto|single|dual)$ ]] || die "--screens must be auto, single or dual"
 
     # shellcheck source=/dev/null
     source /etc/os-release
@@ -261,22 +266,30 @@ preflight() {
         else die "64 bit Raspberry Pi OS is required (found $ARCH). Reflash with the 64 bit image."; fi
     fi
 
-    local model mem_gb
+    local model mem_kb mem_gb
     model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo "not a Raspberry Pi")
-    mem_gb=$(awk '/MemTotal/ {printf "%.1f", $2 / 1048576}' /proc/meminfo)
+    mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    mem_gb=$(awk -v k="$mem_kb" 'BEGIN {printf "%.1f", k / 1048576}')
     info "Hardware: $model, ${mem_gb} GB RAM"
-    if [[ $model == *"Raspberry Pi 4"* ]]; then
-        ok "Raspberry Pi 4 detected"
-    elif ((SKIP_HW_CHECK)); then
-        warn "not a Raspberry Pi 4, continuing (--skip-hw-check)"
-    elif [[ $model == *"Raspberry Pi 5"* ]]; then
-        warn "Raspberry Pi 5 detected. It should work, but this build was made for the Pi 4."
-    else
-        die "this installer targets a Raspberry Pi 4B (found: $model). Use --skip-hw-check to override."
-    fi
-    if awk '/MemTotal/ {exit !($2 < 3500000)}' /proc/meminfo; then
-        if ((SKIP_HW_CHECK)); then warn "under 4 GB RAM"
-        else die "4 GB or 8 GB of RAM is required for two screens (found ${mem_gb} GB)"; fi
+    case "$model" in
+        # "Raspberry Pi 4" also matches the Pi 400, and "Raspberry Pi 5" the Pi 500.
+        *"Raspberry Pi 4"* | *"Raspberry Pi 5"* | *"Compute Module 4"* | *"Compute Module 5"*)
+            ok "two HDMI ports: one or two screens" ;;
+        *"Raspberry Pi 3"* | *"Raspberry Pi Zero 2"*)
+            warn "one HDMI port, so one screen shows everything (lyrics, QR code, singing order)"
+            [[ $SCREENS == dual ]] && warn "--screens dual needs two HDMI ports; this board uses one screen"
+            ;;
+        *"Raspberry Pi"*) warn "untested Raspberry Pi model, continuing" ;;
+        *)
+            if ((SKIP_HW_CHECK)); then warn "not a Raspberry Pi, continuing (--skip-hw-check)"
+            else die "this installer targets a Raspberry Pi (found: $model). Use --skip-hw-check to override."; fi
+            ;;
+    esac
+    if ((mem_kb < 900000)); then
+        if ((SKIP_HW_CHECK)); then warn "under 1 GB RAM"
+        else die "at least 1 GB of RAM is needed for the screen browser and video (found ${mem_gb} GB)"; fi
+    elif ((mem_kb < 3500000)); then
+        warn "under 4 GB RAM: Auto runs one screen for everything. Two screens can still be forced in Settings, Screens."
     fi
 
     local free_gb
@@ -648,7 +661,7 @@ configure_firewall() {
 # ---------------------------------------------------------------- 10. kiosk
 configure_kiosk() {
     ((KIOSK)) || return 0
-    step "Setting up the two HDMI screens"
+    step "Setting up the HDMI screens"
     if ! id "$KIOSK_USER" >/dev/null 2>&1; then
         run useradd --create-home --shell /bin/bash "$KIOSK_USER"
         run passwd --lock "$KIOSK_USER"
@@ -665,14 +678,13 @@ configure_kiosk() {
     render "$SCRIPT_DIR/kiosk/bash_profile" | write_file 644 "$KIOSK_USER:$KIOSK_USER" "$home/.bash_profile"
     write_file 644 root:root "$ETC_DIR/kiosk.env" <<EOF
 # Written by deploy/install-pi.sh. Change and run: sudo kidnyce-karaoke restart screens
+# One screen or two, which port, and swapping them: Settings, Screens, or
+# sudo kidnyce-karaoke screens. Those apply within 5 seconds, no restart.
 APP_URL=http://127.0.0.1:$PORT
-SINGER_OUTPUT=$SINGER_OUTPUT
-CROWD_OUTPUT=$CROWD_OUTPUT
 DISPLAY_MODE=$DISPLAY_MODE
-# hdmi-singer, hdmi-crowd, headphones (3.5 mm jack to your mixer), usb, pulse, or an ALSA PCM
+# hdmi-singer (the singer screen, or the one screen), hdmi-crowd, headphones
+# (3.5 mm jack to your mixer), usb, pulse, or an ALSA PCM
 AUDIO_OUT=$AUDIO_OUT
-# 1 puts the singer screen on the crowd output and the other way round
-SWAP_SCREENS=0
 EOF
     render "$SCRIPT_DIR/files/kiosk-autologin.conf" | write_file 644 root:root /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
 
@@ -696,7 +708,7 @@ EOF
             info "both HDMI outputs forced on at $DISPLAY_MODE (backup: $cmdline.kidnyce.bak)"
         fi
     fi
-    ok "singer screen on $SINGER_OUTPUT, crowd screen on $CROWD_OUTPUT, audio: $AUDIO_OUT"
+    ok "screens: ${SCREENS:-auto}, audio: $AUDIO_OUT"
 }
 
 # ---------------------------------------------------------------- 11. timers
@@ -747,6 +759,21 @@ start_services() {
     fi
 }
 
+# The host's screen choice lives in the app's settings, so it goes in through
+# the app once it runs. Only flags given on this run are applied; Settings
+# keeps everything else.
+apply_screen_choice() {
+    [[ -n $SCREENS || $SWAP_SCREENS == 1 ]] || return 0
+    if ((DRY_RUN)) || ! curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/healthz" >/dev/null 2>&1; then
+        info "app not running, so the screen setup was not applied. Later: sudo kidnyce-karaoke screens ${SCREENS:-auto}"
+        return
+    fi
+    step "Choosing the screen setup"
+    if [[ -n $SCREENS ]]; then /usr/local/bin/kidnyce-karaoke screens "$SCREENS" >/dev/null; fi
+    if ((SWAP_SCREENS)); then /usr/local/bin/kidnyce-karaoke screens swap on >/dev/null; fi
+    ok "screens: ${SCREENS:-as before}$( ((SWAP_SCREENS)) && echo ", singer and room swapped")"
+}
+
 # ---------------------------------------------------------------- summary
 summary() {
     local code="" url=""
@@ -769,7 +796,8 @@ summary() {
         printf '  Admin password: %s%s%s  (also: sudo kidnyce-karaoke password)\n' "$C_BOLD" "$FIRST_PASSWORD" "$C_OFF" >&3
     fi
     if ((KIOSK)); then
-        echo "  Screens:       singer on $SINGER_OUTPUT (micro HDMI next to USB-C), crowd on $CROWD_OUTPUT"
+        echo "  Screens:       two TVs: singer on HDMI0 (next to USB C), room on HDMI1. One TV: everything on it."
+        echo "                 Change in Settings, Screens, or: sudo kidnyce-karaoke screens"
         echo "                 Reboot once to be sure they come up on their own: sudo reboot"
     fi
     if ((${#WARNINGS[@]})); then
@@ -800,6 +828,7 @@ main() {
     configure_kiosk
     configure_timers
     start_services
+    apply_screen_choice
     summary
 }
 

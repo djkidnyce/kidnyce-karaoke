@@ -7,6 +7,10 @@
 #   kidnyce-karaoke password        show the admin password (root only)
 #   kidnyce-karaoke set-password    choose a new admin password
 #   kidnyce-karaoke doctor          check everything and say what is wrong
+#   kidnyce-karaoke screens         the board, its ports, the TVs and what each shows
+#   kidnyce-karaoke screens auto|single|dual   one screen for everything, or two
+#   kidnyce-karaoke screens port NAME|auto     port for one screen, such as HDMI-2
+#   kidnyce-karaoke screens swap on|off        swap the singer and room screens
 #   kidnyce-karaoke logs [app|nginx|screens|ddns]
 #   kidnyce-karaoke restart [app|screens|all]
 #   kidnyce-karaoke update-ytdlp    pull the newest yt-dlp now
@@ -71,6 +75,45 @@ cmd_set_password() {
     "$PREFIX/bin/kidnyce-set-admin-password" <"$ETC_DIR/admin-password"
     systemctl restart kidnyce-karaoke
     echo "Admin password changed. Every device has to log in again."
+}
+
+set_pref() {
+    admin_curl -X POST --data-urlencode "pref=$1" --data-urlencode "val=$2" "$APP/api/change_preferences" |
+        jq -e '.[0] == true' >/dev/null || { echo "Could not change $1." >&2; exit 1; }
+}
+
+cmd_screens() {
+    need_root screens
+    case "${1:-show}" in
+        show) ;;
+        auto | single | dual) set_pref screen_mode "$1" ;;
+        port)
+            [[ ${2:-} =~ ^[A-Za-z][A-Za-z0-9_.-]{0,31}$ ]] || { echo "Usage: kidnyce-karaoke screens port HDMI-1|HDMI-2|auto" >&2; exit 1; }
+            set_pref single_screen_output "$2"
+            ;;
+        swap)
+            case "${2:-}" in
+                on) set_pref swap_screens True ;;
+                off) set_pref swap_screens False ;;
+                *) echo "Usage: kidnyce-karaoke screens swap on|off" >&2; exit 1 ;;
+            esac
+            ;;
+        *) echo "screens: auto, single, dual, port NAME, or swap on|off" >&2; exit 1 ;;
+    esac
+    [[ ${1:-show} == show ]] || echo "Saved. The screens switch within 5 seconds."
+    admin_curl "$APP/api/display/hardware" | jq -r '
+        "Board:  \(.board.model), \(.board.memory_gb) GB RAM, "
+            + (if .dual_capable then "two screens supported" else "one display port" end),
+        "Setup:  \(.settings.screen_mode)   one screen port: \(.settings.single_screen_output)   swap: \(if .settings.swap_screens then "on" else "off" end)",
+        "Ports:",
+        (.ports[] | "  \(.label) [\(.output)]: "
+            + (if .connected
+                then "\(.monitor // "TV")\(if .preferred_mode then " " + .preferred_mode else "" end), showing \(.role // "nothing (off)")"
+                else "nothing plugged in" end)),
+        "Now:    " + (if .layout.mode == "none" then "no TV plugged in"
+            else (.layout.screens | map("\(.role) on \(.output)") | join(", ")) end) + "  (\(.layout.note))",
+        (if .screens_running then "The screens checked in \(.seconds_since_report) s ago."
+            else "The screens are not running." end)'
 }
 
 cert_days_left() {
@@ -138,7 +181,16 @@ cmd_doctor() {
 
     if [[ ${KIOSK:-0} == 1 ]]; then
         if pgrep -u "$KIOSK_USER" -f 'kiosk-session.sh' >/dev/null; then ok "screen session running"; else warn "screen session not running (is a TV plugged in? check: kidnyce-karaoke logs screens)"; fi
-        if [[ -n $(pgrep -u "$KIOSK_USER" -f -- '--user-data-dir=.*/crowd' || true) ]]; then ok "crowd screen up"; else warn "crowd screen not up (needs a second TV on HDMI 1)"; fi
+        local role up=()
+        for role in singer crowd all; do
+            [[ -n $(pgrep -u "$KIOSK_USER" -f -- "--user-data-dir=.*/$role( |$)" || true) ]] && up+=("$role")
+        done
+        case "${up[*]}" in
+            "singer crowd") ok "two screens up: singer and room" ;;
+            all) ok "one screen up, showing everything (sudo kidnyce-karaoke screens for details)" ;;
+            "") warn "no screen browser running (is a TV plugged in? check: kidnyce-karaoke logs screens)" ;;
+            *) warn "screens up: ${up[*]} (sudo kidnyce-karaoke screens for details)" ;;
+        esac
         if command -v aplay >/dev/null; then echo "  Sound devices:"; aplay -l 2>/dev/null | awk '/^card/ {print "    " $0}'; fi
     fi
 
@@ -174,10 +226,11 @@ case "${1:-status}" in
     password) cmd_password ;;
     set-password) cmd_set_password ;;
     doctor) cmd_doctor ;;
+    screens) cmd_screens "${2:-show}" "${3:-}" ;;
     logs) cmd_logs "${2:-app}" ;;
     restart) cmd_restart "${2:-all}" ;;
     update-ytdlp) need_root update-ytdlp; systemctl start kidnyce-karaoke-ytdlp; "$PREFIX/venv/bin/python" -I -m yt_dlp --version ;;
     ddns) need_root ddns; /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record checked." ;;
-    -h | --help | help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+    -h | --help | help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) echo "Unknown command: $1 (try: kidnyce-karaoke help)" >&2; exit 1 ;;
 esac

@@ -22,6 +22,8 @@
     hideOverlay: "{{ hide_overlay }}" == 'True',
     hideSessionName: "{{ hide_session_name }}" == 'True',
     translations: {
+      // {# MSG: Count of extra queued songs not listed on the one screen setup. {count} is a number. #}
+      moreInLine: {{ _('+{count} more') | tojson }},
       socketConnectionLost: {{ _('Connection lost. Is the server still running?') | tojson }},
       unsupportedBrowser: {{ _('This browser is not fully supported. You may experience streaming issues. Please use Chrome/Safari/Firefox/Edge for best results.') | tojson }},
     },
@@ -76,6 +78,12 @@
 
 <div id="bottom-container" class="overlay">
   <div id="qr-code">
+    <div id="all-queue" class="all-queue" style="display: none">
+      {# MSG: Heading for the singing order when one screen shows everything. #}
+      <div class="all-queue-label">{% trans %}Up next{% endtrans %}</div>
+      <ol id="all-queue-list"></ol>
+      <div id="all-queue-more" class="all-queue-more"></div>
+    </div>
     <img
       class="splash-qr-image"
       src="{{ url_for('images.qrcode') }}"
@@ -83,6 +91,7 @@
       style="image-rendering: pixelated{% if hide_qr_code %}; display: none{% endif %}"
       alt="qrcode"
     />
+    <div id="splash-join-code" class="splash-join-code stroke" style="display: none"></div>
     <div class="splash-url is-size-6 stroke"{% if hide_url %} style="display: none"{% endif %}>
       <div>&nbsp;{{ url }}</div>
     </div>
@@ -382,6 +391,34 @@
   }
   .timestamp {
     font-family: monospace;
+  }
+  /* ?all=1: one screen carries the singing order, a bigger QR code and the join code. */
+  body.all-in-one #qr-code { max-width: 30%; }
+  body.all-in-one #qr-code .splash-qr-image { width: 170px; }
+  .all-queue {
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin-bottom: 12px;
+    color: #fff;
+    max-width: 380px;
+  }
+  .all-queue-label {
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+  .all-queue ol { margin: 4px 0 0 1.4em; font-size: 1.15rem; }
+  .all-queue li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .all-queue li b { color: #48c78e; }
+  .all-queue-more { font-size: 0.85rem; opacity: 0.75; }
+  .splash-join-code {
+    color: #fff;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    font-variant-numeric: tabular-nums;
   }
   #intermission-overlay {
     position: absolute;

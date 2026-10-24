@@ -13,6 +13,7 @@ import qrcode
 from flask_babel import _
 from qrcode.image.pure import PyPNGImage
 
+from pikaraoke.lib.display_hardware import KioskReport, detect_board
 from pikaraoke.lib.download_manager import DownloadManager
 from pikaraoke.lib.events import EventSystem
 from pikaraoke.lib.ffmpeg import (
@@ -43,6 +44,9 @@ from pikaraoke.lib.sound_manager import SoundManager
 from pikaraoke.lib.url_prefix import append_base_path_to_url
 from pikaraoke.lib.youtube_dl import get_youtubedl_version, upgrade_youtubedl
 from pikaraoke.version import __version__ as VERSION
+
+# How often the idle run loop looks for last night's session to close.
+STALE_CHECK_SECONDS = 600
 
 
 class SongInUseError(Exception):
@@ -347,7 +351,14 @@ class Karaoke:
         return session["uuid"] if session else None
 
     def _init_kidnyce_features(self) -> None:
-        """Join codes, break music, request stats and the number one charts."""
+        """Join codes, break music, request stats, the number one charts and the screens."""
+        self.board = detect_board()
+        self.kiosk_report = KioskReport()
+
+        # Last night's session closes before the code is read, so tonight's
+        # guests scan a code the first song keeps rather than replaces.
+        self.play_history.end_stale_session()
+        self._next_stale_check = time.monotonic() + STALE_CHECK_SECONDS
         self.join_codes = JoinCodeManager(self.db, self.events, self.current_session_uuid)
         self.events.on("join_code_changed", self.generate_qr_code)
         self.generate_qr_code()
@@ -370,6 +381,15 @@ class Karaoke:
             ),
         )
         self.intermission_library.scan_in_background()
+
+    def _end_stale_session_when_idle(self) -> None:
+        """Between nights, while nobody is singing or waiting to sing."""
+        now = time.monotonic()
+        if now < self._next_stale_check:
+            return
+        self._next_stale_check = now + STALE_CHECK_SECONDS
+        if not self.queue_manager.queue and not self.playback_controller.is_playing:
+            self.play_history.end_stale_session()
 
     def get_intermission_music_path(self) -> str | None:
         """The break music folder: its own setting, else the background music folder."""
@@ -810,6 +830,7 @@ class Karaoke:
 
                 self.playback_controller.end_if_overran()
                 self.playback_controller.log_output()
+                self._end_stale_session_when_idle()
                 self.handle_run_loop()
             except KeyboardInterrupt:
                 logging.warning("Keyboard interrupt: Exiting pikaraoke...")

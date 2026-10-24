@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# Tests deploy/kiosk/kiosk-session.sh against a real Xorg server with two
-# virtual outputs (xserver-xorg-video-dummy), standing in for the Pi's two
-# HDMI ports. Needs a running app on 127.0.0.1:5555, Xorg with the dummy
-# driver, xrandr, xwininfo, xdotool, and a Chromium binary.
+# Tests deploy/kiosk/kiosk-session.sh against a real Xorg server with virtual
+# outputs (xserver-xorg-video-dummy) standing in for the Pi's two HDMI ports.
+# Needs the installed app running on 127.0.0.1:5555 (sandbox-e2e.sh runs this
+# at its end), Xorg with the dummy driver, xrandr, xwininfo, xdotool, and a
+# Chromium binary.
 #
 #   sudo CHROME=/path/to/chrome deploy/tests/kiosk-xdummy-test.sh
 #
-# Checks: both outputs get the requested mode side by side, the singer and crowd
-# browsers land on the right output with the right URL, a crashed browser is
-# relaunched, and with one screen the normal splash page is shown.
+# Checks: with two TVs Auto gives a singer and a room screen side by side at the
+# requested mode, each browser on the right port with the right page; a crashed
+# browser comes back; the app sees the ports; the host switches to one screen
+# for everything, moves it to the other port, and goes back to two screens
+# swapped, each within seconds and without a restart; with one TV everything
+# goes on it.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SESSION="$HERE/../kiosk/kiosk-session.sh"
 CHROME=${CHROME:?set CHROME to a Chromium binary}
+CLI=${CLI:-/usr/local/bin/kidnyce-karaoke}
+APP=http://127.0.0.1:5555
 WORK=$(mktemp -d)
 PASS=0
 FAIL=0
 X_PID=""
 S_PID=""
+export NO_PROXY="127.0.0.1${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1${no_proxy:+,$no_proxy}"
 
 pass() { PASS=$((PASS + 1)); printf '  PASS %s\n' "$*"; }
 fail() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$*"; }
+check() { local name=$1; shift; if "$@" >/dev/null; then pass "$name"; else fail "$name"; fi; }
 
 cat >"$WORK/xorg.conf" <<'EOF'
 Section "Device"
@@ -50,13 +58,11 @@ mkdir -p "$WORK/bin" "$WORK/home"
 # Root cannot run Chromium's sandbox; the real kiosk runs as an unprivileged user.
 printf '#!/bin/bash\nexec "%s" --no-sandbox "$@"\n' "$CHROME" >"$WORK/bin/chromium"
 chmod +x "$WORK/bin/chromium"
-cat >"$WORK/kiosk.env" <<'EOF'
-APP_URL=http://127.0.0.1:5555
-SINGER_OUTPUT=DUMMY0
-CROWD_OUTPUT=DUMMY1
+cat >"$WORK/kiosk.env" <<EOF
+APP_URL=$APP
 DISPLAY_MODE=1920x1080
 AUDIO_OUT=default
-SWAP_SCREENS=0
+POLL_SECONDS=2
 EOF
 
 start_x() {
@@ -82,7 +88,11 @@ stop_all() {
     S_PID=""
     X_PID=""
 }
-trap stop_all EXIT
+
+host_defaults() {
+    "$CLI" screens auto >/dev/null && "$CLI" screens swap off >/dev/null && "$CLI" screens port auto >/dev/null
+}
+trap 'stop_all; host_defaults' EXIT
 
 # Window geometry as WxH+X+Y for every visible top level Chromium window.
 windows() {
@@ -93,7 +103,28 @@ windows() {
     done | sort
 }
 
-echo "== Two screens"
+# "DUMMY0 1920x1080+0+0" per connected output; one that is off says "off".
+outputs() {
+    DISPLAY=":$1" xrandr --query | awk '$2 == "connected" {g = "off"
+        for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/) g = $i
+        print $1, g}'
+}
+
+# Wait until the kiosk log holds a line at least COUNT times.
+wait_log() {
+    local line=$1 count=${2:-1} _
+    for _ in $(seq 1 40); do
+        (($(grep -cF -- "$line" "$WORK/kiosk.log") >= count)) && return 0
+        sleep 1
+    done
+    return 1
+}
+
+started() { grep -cF "started $1 screen" "$WORK/kiosk.log"; }
+
+host_defaults || { echo "cannot reach the app as host through $CLI"; exit 1; }
+
+echo "== Two TVs, Auto"
 start_x 91
 # Plug in the second "TV": give DUMMY1 a mode, at an odd size and place the
 # session has to correct.
@@ -101,23 +132,17 @@ DISPLAY=:91 xrandr --addmode DUMMY1 1920x1080
 DISPLAY=:91 xrandr --addmode DUMMY1 1280x1024
 DISPLAY=:91 xrandr --output DUMMY0 --mode 1600x1200 --output DUMMY1 --mode 1280x1024 --pos 1600x0
 start_session 91
-sleep 20
-layout=$(DISPLAY=:91 xrandr --query | awk '$2 == "connected" {print $1, ($3 == "primary" ? $4 : $3)}')
+wait_log "started crowd screen"
+sleep 3
+layout=$(outputs 91)
 if grep -qx "DUMMY0 1920x1080+0+0" <<<"$layout" && grep -qx "DUMMY1 1920x1080+1920+0" <<<"$layout"; then
     pass "outputs set to 1920x1080, side by side"
 else
     fail "layout: $layout"
 fi
-if grep -q "started singer screen at 1920x1080+0+0: http://127.0.0.1:5555/splash?singer=1" "$WORK/kiosk.log"; then
-    pass "singer screen on DUMMY0 without the QR code"
-else
-    fail "singer launch: $(grep started "$WORK/kiosk.log")"
-fi
-if grep -q "started crowd screen at 1920x1080+1920+0: http://127.0.0.1:5555/crowd" "$WORK/kiosk.log"; then
-    pass "crowd screen on DUMMY1"
-else
-    fail "crowd launch: $(grep started "$WORK/kiosk.log")"
-fi
+check "singer screen on DUMMY0 without the QR code" \
+    grep -F "started singer screen at 1920x1080+0+0: $APP/splash?singer=1" "$WORK/kiosk.log"
+check "room screen on DUMMY1" grep -F "started crowd screen at 1920x1080+1920+0: $APP/crowd" "$WORK/kiosk.log"
 geoms=$(windows 91 | tr '\n' ' ')
 # Without a window manager a borderless window can report 1px under its request.
 if [[ $geoms =~ (1919|1920)x(1079|1080)\+0\+0 && $geoms =~ (1919|1920)x(1079|1080)\+1920\+0 ]]; then
@@ -125,35 +150,58 @@ if [[ $geoms =~ (1919|1920)x(1079|1080)\+0\+0 && $geoms =~ (1919|1920)x(1079|108
 else
     fail "browser windows: $geoms"
 fi
-if pgrep -f 'kidnyce-kiosk/crowd.*--mute-audio' >/dev/null; then
-    pass "crowd browser is muted"
-else
-    fail "crowd browser not started with --mute-audio"
-fi
+check "room browser is muted" pgrep -f 'kidnyce-kiosk/crowd.*--mute-audio'
 DISPLAY=:91 import -window root "$WORK/two-screens.png" 2>/dev/null
 
-crowd_pid=$(pgrep -f 'kidnyce-kiosk/crowd' -o)
-kill "$crowd_pid" 2>/dev/null
-sleep 12
-if [[ $(grep -c "started crowd screen" "$WORK/kiosk.log") -ge 2 ]]; then
-    pass "a crashed browser is relaunched"
-else
-    fail "no relaunch after the crowd browser died"
-fi
-stop_all
+kill "$(pgrep -f 'kidnyce-kiosk/crowd' -o)" 2>/dev/null
+check "a crashed browser is relaunched" wait_log "started crowd screen" 2
 
-echo "== One screen"
+status=$("$CLI" screens)
+check "the app sees both ports and what each shows" bash -c \
+    "grep -qF 'DUMMY0 [DUMMY0]: TV, showing singer' <<<'$status' &&
+     grep -qF 'DUMMY1 [DUMMY1]: TV, showing crowd' <<<'$status' &&
+     grep -q 'checked in' <<<'$status'"
+
+echo "== Host picks one screen for everything"
+"$CLI" screens single >/dev/null
+check "one screen comes up within seconds" wait_log "started all screen at 1920x1080+0+0: $APP/splash?all=1"
+sleep 3
+check "the second TV is turned off" grep -qx "DUMMY1 off" <<<"$(outputs 91)"
+check "only one browser left" test -z "$(pgrep -f 'kidnyce-kiosk/(singer|crowd)')"
+DISPLAY=:91 import -window root -crop 1920x1080+0+0 "$WORK/one-screen.png" 2>/dev/null
+
+echo "== Host moves it to the other port"
+"$CLI" screens port DUMMY1 >/dev/null
+wait_log "started all screen" 2
+sleep 3
+layout=$(outputs 91)
+check "everything on DUMMY1, DUMMY0 off" \
+    bash -c "grep -qx 'DUMMY1 1920x1080+0+0' <<<'$layout' && grep -qx 'DUMMY0 off' <<<'$layout'"
+
+echo "== Host goes back to two screens, swapped"
+"$CLI" screens swap on >/dev/null
+"$CLI" screens dual >/dev/null
+wait_log "started crowd screen" 3
+sleep 3
+layout=$(outputs 91)
+check "singer on DUMMY1, room on DUMMY0" \
+    bash -c "grep -qx 'DUMMY1 1920x1080+0+0' <<<'$layout' && grep -qx 'DUMMY0 1920x1080+1920+0' <<<'$layout'"
+check "the app agrees the singer is on DUMMY1" grep -F 'DUMMY1 [DUMMY1]: TV, showing singer' <<<"$("$CLI" screens)"
+before=$(grep -c started "$WORK/kiosk.log")
+sleep 8
+check "no relaunch while nothing changes" test "$(grep -c started "$WORK/kiosk.log")" -eq "$before"
+stop_all
+host_defaults
+
+echo "== One TV, Auto"
 start_x 92
 start_session 92
-sleep 15
-if grep -q "started singer screen at 1920x1080+0+0: http://127.0.0.1:5555/splash$" "$WORK/kiosk.log" &&
-    ! grep -q "started crowd screen" "$WORK/kiosk.log"; then
-    pass "one screen shows the normal splash page with its QR code"
-else
-    fail "single screen: $(grep started "$WORK/kiosk.log")"
-fi
+wait_log "started all screen"
+sleep 2
+check "one TV shows everything" grep -F "started all screen at 1920x1080+0+0: $APP/splash?all=1" "$WORK/kiosk.log"
+check "no room screen without a second TV" test "$(started crowd)" -eq 0
 stop_all
 
 echo
-echo "Passed: $PASS  Failed: $FAIL  (screenshot: $WORK/two-screens.png)"
+echo "Passed: $PASS  Failed: $FAIL  (screenshots: $WORK/two-screens.png $WORK/one-screen.png)"
 ((FAIL == 0))

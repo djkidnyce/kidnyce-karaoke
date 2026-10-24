@@ -2,7 +2,8 @@
 
 Run by sandbox-e2e.sh after the installer. Plays the night through: the two
 screens open on the Pi, a phone scans in, songs get queued, a break comes
-round. Writes screenshots and exits non zero if anything is off.
+round. Also opens the one screen setup and the host's Screens settings.
+Writes screenshots and exits non zero if anything is off.
 
 Playwright's Chromium cannot decode H.264, so the karaoke video itself does
 not play here (the Pi's Chromium does). Everything around it is checked.
@@ -15,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, sync_playwright  # pylint: disable=import-error
 
 DOMAIN, PORT, CODE, ADMIN_PASSWORD, SONG_A, SONG_B, OUT = sys.argv[1:8]
 OUT_DIR = Path(OUT)
@@ -184,6 +185,29 @@ with sync_playwright() as p:
     crowd.screenshot(path=str(OUT_DIR / "crowd-singing.png"))
     singer.screenshot(path=str(OUT_DIR / "singer-singing.png"))
 
+    # The one screen setup, as the kiosk opens it with a single TV. It joins as
+    # a follower, since the singer screen above is already the player.
+    one = screens.new_page()
+    watch_console(one, "one screen")
+    one.goto(f"{LOCAL}/splash?all=1")
+    check(
+        "one screen setup shows the join code",
+        wait_for(lambda: one.inner_text("#splash-join-code") == expected_code, 15),
+        one.inner_text("#splash-join-code"),
+    )
+    check(
+        "one screen setup lists who is next",
+        wait_for(lambda: "Bo" in one.inner_text("#all-queue-list"), 10),
+    )
+    check(
+        "one screen setup shows the QR code",
+        one.evaluate(
+            "[...document.querySelectorAll('#qr-code .splash-qr-image')].some(e => getComputedStyle(e).display !== 'none' && e.naturalWidth > 0)"
+        ),
+    )
+    one.screenshot(path=str(OUT_DIR / "one-screen.png"))
+    one.close()
+
     # The song cannot decode here, so the singer screen ends it after its
     # start timeout, and the break is due before Bo.
     check(
@@ -238,6 +262,39 @@ with sync_playwright() as p:
     )
     admin_page.goto(f"{SITE}/info")
     admin_page.wait_for_load_state("networkidle")
+    check(
+        "Settings, Screens names the board",
+        wait_for(lambda: "GB RAM" in admin_page.inner_text("#screens-board"), 10),
+        admin_page.inner_text("#screens-board"),
+    )
+    admin_page.click("h3:text-is('Screens')")
+    admin_page.select_option("#pref-screen-mode", "single")
+    check(
+        "host picks one screen in Settings",
+        wait_for(
+            lambda: admin_ctx.request.get(f"{SITE}/api/display/hardware").json()["settings"][
+                "screen_mode"
+            ]
+            == "single",
+            10,
+        ),
+    )
+    check(
+        "the swap option hides with one screen",
+        wait_for(lambda: not admin_page.is_visible("#screens-swap-field"), 10),
+    )
+    admin_page.screenshot(path=str(OUT_DIR / "host-screens.png"), full_page=True)
+    admin_page.select_option("#pref-screen-mode", "auto")
+    check(
+        "host goes back to Auto",
+        wait_for(
+            lambda: admin_ctx.request.get(f"{SITE}/api/display/hardware").json()["settings"][
+                "screen_mode"
+            ]
+            == "auto",
+            10,
+        ),
+    )
     admin_page.screenshot(path=str(OUT_DIR / "host-settings.png"), full_page=True)
 
     check(

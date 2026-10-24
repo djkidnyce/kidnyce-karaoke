@@ -81,6 +81,24 @@ def test_first_session_adopts_the_lobby_code(codes, history):
     assert codes.code == lobby
 
 
+def test_a_new_night_gets_a_code_the_first_song_keeps(db, events, history, codes):
+    """Last night's session closes at startup, not at tonight's first song."""
+    db.insert_songs([{"file_path": "/songs/a.mp4", "youtube_id": None, "format": "mp4"}])
+    song_id = db.get_song_identity("/songs/a.mp4")[0]
+    history.record_play(song_id, None, "Ana", "A Song")
+    events.emit("song_ended", "complete")
+    last_night = codes.code
+    db.execute("UPDATE plays SET played_at = datetime('now', '-12 hours')")
+    db.execute("UPDATE sessions SET started_at = datetime('now', '-12 hours')")
+
+    assert history.end_stale_session()
+    tonight = codes.code
+    assert tonight != last_night
+
+    history.record_play(song_id, None, "Bo", "A Song")  # the first song of the night
+    assert codes.code == tonight
+
+
 def test_renaming_the_session_keeps_the_code(codes, history):
     uuid = history.start_session("Friday")
     code = codes.code

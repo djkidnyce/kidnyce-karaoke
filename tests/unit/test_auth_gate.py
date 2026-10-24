@@ -54,6 +54,7 @@ EXPECTED_PUBLIC_ENDPOINTS = {
     "charts.most_requested",
     "charts.number_ones",
     "display.crowd",
+    "display.layout",
     "display.state",
     "intermission.track",
     "join.healthz",

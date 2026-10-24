@@ -31,6 +31,11 @@ let currentPlaybackId = null;
 // ?singer=1 is the singer's screen in a two screen setup. The crowd screen carries
 // the QR code and join code, so this one stays clean: lyrics and who is next.
 const isSingerScreen = new URLSearchParams(window.location.search).get('singer') === '1';
+// ?all=1 is the one screen setup: this screen also carries the join code and
+// the singing order that the crowd screen would show.
+const isAllInOne = new URLSearchParams(window.location.search).get('all') === '1';
+// How much of the queue fits in the corner without covering the lyrics.
+const ALL_IN_ONE_QUEUE = 4;
 // Created on first use: this script runs in <head>, before the <audio> exists.
 let intermissionPlayer = null;
 const getIntermissionPlayer = () =>
@@ -473,6 +478,28 @@ const refreshQrCode = () => {
   });
 };
 
+// One screen setup: the singing order and join code, from the crowd screen's feed.
+// Names and titles come from guests' phones, so they go in as text.
+const renderAllInOne = (state) => {
+  const join = state.join;
+  const code = join.code || "";
+  $("#splash-join-code")
+    .text(code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code)
+    .toggle(Boolean(join.required && code));
+  const $list = $("#all-queue-list").empty();
+  state.queue.slice(0, ALL_IN_ONE_QUEUE).forEach((item) => {
+    $list.append($("<li>").append($("<b>").text(item.user), document.createTextNode(` ${item.title}`)));
+  });
+  const extra = state.queue_length - Math.min(state.queue.length, ALL_IN_ONE_QUEUE);
+  $("#all-queue-more").text(extra > 0 ? PikaraokeConfig.translations.moreInLine.replace("{count}", extra) : "");
+  $("#all-queue").toggle(state.queue.length > 0);
+};
+
+const refreshAllInOne = () => {
+  if (!isAllInOne) return;
+  $.getJSON(withBasePath("/api/display/state")).done(renderAllInOne);
+};
+
 async function loadNowPlaying() {
   handleNowPlayingUpdate(await $.get(withBasePath("/api/now_playing")));
 }
@@ -736,7 +763,8 @@ const setupSocketEvents = () => {
     }
   });
   socket.on("now_playing", handleNowPlayingUpdate);
-  socket.on("join_code_changed", refreshQrCode);
+  socket.on("join_code_changed", () => { refreshQrCode(); refreshAllInOne(); });
+  socket.on("queue_update", refreshAllInOne);
   socket.on("preferences_update", applyPreferenceUpdate);
   socket.on("preferences_reset", applyPreferencesReset);
   socket.on("score_phrases_update", (phrases) => { scoreReviews = phrases; });
@@ -823,6 +851,13 @@ const applyUIScale = (scale) => {
 $(function () {
   // Setup various features and listeners
   if (isSingerScreen) $(".splash-qr-image, .splash-url").hide();
+  if (isAllInOne) {
+    // The list replaces the single "Up next" line in the other corner.
+    $("body").addClass("all-in-one");
+    $("#up-next").remove();
+    refreshAllInOne();
+    setInterval(refreshAllInOne, 30000);
+  }
   applyUIScale(effectiveUIScale());
   if (PikaraokeConfig.showSplashClock) startClock();
   setupScreensaver();

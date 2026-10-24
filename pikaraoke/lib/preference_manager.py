@@ -62,6 +62,10 @@ class PreferenceManager:
         "intermission_every": 1,
         "intermission_volume": 0.8,
         "intermission_fill": False,
+        # Screens: "auto", "single" (one screen for everything) or "dual"
+        "screen_mode": "auto",
+        "single_screen_output": "auto",
+        "swap_screens": False,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:
