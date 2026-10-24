@@ -27,7 +27,6 @@ sudo ./deploy/install-pi.sh --cf-token-file ~/cloudflare.token
 ```
 
 The full guide, Cloudflare setup included, is in [deploy/README.md](deploy/README.md).
-What changed from upstream and how it was tested is in [HANDOFF.md](HANDOFF.md).
 
 ## Upstream
 
