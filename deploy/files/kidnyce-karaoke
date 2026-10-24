@@ -141,11 +141,18 @@ cmd_audio() {
         echo "Choices: hdmi-singer (singer TV, or the one screen), hdmi-crowd, headphones (3.5 mm jack), usb, or an ALSA PCM"
         echo "Sound devices:"
         aplay -l 2>/dev/null | awk '/^card/ {print "  " $0}'
-        echo "Volume for a USB interface: alsamixer -c <card name from the list>"
+        echo "Volume: alsamixer -c Headphones (3.5 mm jack) or alsamixer -c <USB card name>"
+        echo "Test a device: speaker-test -D plughw:CARD=Headphones,DEV=0 -c 2 -t wav -l 1"
         return
     fi
     need_root audio
-    [[ $1 =~ ^[A-Za-z0-9:=,_.-]+$ ]] || { echo "Not a valid output: $1" >&2; exit 1; }
+    # A keyword, or an ALSA PCM name such as plughw:CARD=Device,DEV=0. A bare
+    # word like "card" is neither, and would leave the player silent.
+    case "$1" in
+        hdmi-singer | hdmi-crowd | headphones | usb | pulse | default) ;;
+        *:*) [[ $1 =~ ^[A-Za-z0-9:=,_.-]+$ ]] || { echo "Not a valid output: $1" >&2; exit 1; } ;;
+        *) echo "Not a valid output: $1. Use hdmi-singer, hdmi-crowd, headphones, usb, or a PCM like plughw:CARD=Device,DEV=0" >&2; exit 1 ;;
+    esac
     if grep -q '^AUDIO_OUT=' "$env"; then
         sed -i "s|^AUDIO_OUT=.*|AUDIO_OUT=$1|" "$env"
     else
@@ -173,11 +180,16 @@ cmd_mode() {
     local dropin=/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
     case "${1:-}" in
         desktop)
-            systemctl cat display-manager.service >/dev/null 2>&1 ||
-                { echo "No desktop is installed (Raspberry Pi OS Lite). For WiFi use: sudo kidnyce-karaoke wifi" >&2; exit 1; }
+            # The installer disabled the login screen, which removes the
+            # display-manager.service alias, so look for the real unit.
+            local dm="" unit
+            for unit in lightdm gdm3 gdm sddm greetd; do
+                if systemctl cat "$unit.service" >/dev/null 2>&1; then dm=$unit; break; fi
+            done
+            [[ -n $dm ]] || { echo "No desktop is installed (Raspberry Pi OS Lite). For WiFi use: sudo kidnyce-karaoke wifi" >&2; exit 1; }
             if [[ -f $dropin ]]; then mv -f "$dropin" "$dropin.off"; fi
             systemctl daemon-reload
-            systemctl enable display-manager.service >/dev/null 2>&1
+            systemctl enable --force "$dm.service" >/dev/null 2>&1
             systemctl set-default graphical.target >/dev/null
             echo "Desktop mode set. Rebooting in 5 seconds. Back to the screens: sudo kidnyce-karaoke mode karaoke"
             ;;
