@@ -96,6 +96,7 @@ def splash():
         site_title=site_name,
         blank_page=True,
         url=k.guest_url(),
+        end_countdown_seconds=int(k.preferences.get_or_default("end_countdown_seconds") or 0),
         hostap_info=text,
         hide_url=k.hide_url,
         hide_qr_code=k.hide_qr_code,

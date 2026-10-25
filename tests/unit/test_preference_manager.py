@@ -313,6 +313,7 @@ def test_preference_manager_defaults_exist():
         "night_ends_at",
         "changeover_seconds",
         "show_time_left_to_guests",
+        "end_countdown_seconds",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

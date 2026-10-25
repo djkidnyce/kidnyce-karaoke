@@ -385,6 +385,14 @@
 					<input id="pref-show-host-address" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="show_host_address" {% if show_host_address == True %}checked{% endif %}>
 				</label>
 				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-end-countdown">
+						{# MSG: Number input: a big countdown on the singer's screen for a song's last seconds. #} {% trans %}Countdown for the singer, last seconds of a song{% endtrans %}
+						{# MSG: Explains the singer countdown setting. #}
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}0 turns it off. The screens pick up a change on their next reload.{% endtrans %}</span>
+					</label>
+					<input id="pref-end-countdown" class="user-preference-input input is-flex-shrink-0 ml-4" type="number" min="0" max="60" step="5" data-pref="end_countdown_seconds" data-start-value="{{ end_countdown_seconds }}" value="{{ end_countdown_seconds }}" />
+				</div>
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
 					<label for="pref-screensaver-timeout">
 						{# MSG: Numberbox label for setting the inactive delay before showing the screensaver #} {% trans %}Screensaver after (seconds){% endtrans %}
 						<span class="is-block is-size-7 has-text-grey-light">{% trans %}0 turns it off.{% endtrans %}</span>

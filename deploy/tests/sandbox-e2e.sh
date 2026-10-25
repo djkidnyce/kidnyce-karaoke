@@ -162,6 +162,7 @@ check "joined guest sees the home page" bash -c "curl -s -b '$jar' -o /dev/null 
 check "joined guest can call the API" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/api/get_queue | grep -qx 200"
 check "crowd screen state hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/api/display/state | grep -qx 404"
 check "crowd page hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/crowd | grep -qx 404"
+check "the singer screen counts down the last 20 seconds" bash -c "curl -fs 'http://127.0.0.1:$PORT/splash?singer=1' | grep -q 'end-countdown.js[^>]*data-seconds=\"20\"'"
 check "crowd page served to the Pi itself" bash -c "curl -fs http://127.0.0.1:$PORT/crowd | grep -q crowd.js"
 check "screen layout hidden from joined guests" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} '$U/api/display/layout?connected=HDMI-9' | grep -qx 404"
 check "screen hardware is host only" bash -c "curl -s -b '$jar' -o /dev/null -w '%{http_code}' ${H[*]} $U/api/display/hardware | grep -qx 403"
