@@ -388,9 +388,30 @@
 					<label for="pref-end-countdown">
 						{# MSG: Number input: a big countdown on the singer's screen for a song's last seconds. #} {% trans %}Countdown for the singer, last seconds of a song{% endtrans %}
 						{# MSG: Explains the singer countdown setting. #}
-						<span class="is-block is-size-7 has-text-grey-light">{% trans %}0 turns it off. The screens pick up a change on their next reload.{% endtrans %}</span>
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}Seconds before the end. 0 turns it off. Changes reach the screens at once.{% endtrans %}</span>
 					</label>
 					<input id="pref-end-countdown" class="user-preference-input input is-flex-shrink-0 ml-4" type="number" min="0" max="60" step="5" data-pref="end_countdown_seconds" data-start-value="{{ end_countdown_seconds }}" value="{{ end_countdown_seconds }}" />
+				</div>
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-end-countdown-position">
+						{# MSG: Select: where the singer's countdown sits on the screen. #} {% trans %}Where the countdown sits{% endtrans %}
+					</label>
+					<div class="select is-flex-shrink-0 ml-4">
+						<select id="pref-end-countdown-position" class="user-preference-input" data-pref="end_countdown_position" data-start-value="{{ end_countdown_position }}">
+							{% set positions = [
+								('top-left', _('Top left')),
+								('top-center', _('Top center')),
+								('top-right', _('Top right')),
+								('center', _('Center of the screen')),
+								('bottom-left', _('Bottom left')),
+								('bottom-center', _('Bottom center')),
+								('bottom-right', _('Bottom right')),
+							] %}
+							{% for value, label in positions %}
+							<option value="{{ value }}" {% if end_countdown_position == value %}selected{% endif %}>{{ label }}</option>
+							{% endfor %}
+						</select>
+					</div>
 				</div>
 				<div class="panel-block px-5 py-3 is-justify-content-space-between">
 					<label for="pref-screensaver-timeout">

@@ -93,6 +93,7 @@ def settings():
         join_via_internet=k.preferences.get_or_default("join_via_internet"),
         night_ends_at=k.preferences.get_or_default("night_ends_at"),
         end_countdown_seconds=k.preferences.get_or_default("end_countdown_seconds"),
+        end_countdown_position=k.preferences.get_or_default("end_countdown_position"),
         changeover_seconds=k.preferences.get_or_default("changeover_seconds"),
         show_time_left_to_guests=k.preferences.get_or_default("show_time_left_to_guests"),
         show_host_address=k.preferences.get_or_default("show_host_address"),

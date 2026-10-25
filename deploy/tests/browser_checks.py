@@ -197,6 +197,23 @@ with sync_playwright() as p:
         ),
         str(countdown),
     )
+    admin_ctx.request.post(
+        f"{SITE}/api/change_preferences",
+        form={"pref": "end_countdown_position", "val": "bottom-right"},
+    )
+    check(
+        "the host moves the countdown and the singer screen follows at once",
+        wait_for(
+            lambda: singer.evaluate(
+                "document.getElementById('kn-end-countdown').classList.contains('pos-bottom-right')"
+            ),
+            10,
+        ),
+    )
+    admin_ctx.request.post(
+        f"{SITE}/api/change_preferences",
+        form={"pref": "end_countdown_position", "val": "top-center"},
+    )
     check(
         "the room screen has no countdown",
         crowd.evaluate("document.getElementById('kn-end-countdown') === null"),
