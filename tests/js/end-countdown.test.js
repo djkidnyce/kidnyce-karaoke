@@ -22,3 +22,20 @@ describe("end countdown", () => {
     expect(countdownText(240, 230, 0)).toBe("");
   });
 });
+
+const { position, POSITIONS } = require("../../pikaraoke/static/js/end-countdown.js");
+
+describe("countdown position", () => {
+  it("offers the seven places", () => {
+    expect(POSITIONS).toEqual([
+      "top-left", "top-center", "top-right", "center",
+      "bottom-left", "bottom-center", "bottom-right",
+    ]);
+  });
+  it("keeps a known place and falls back to top center", () => {
+    expect(position("bottom-right")).toBe("bottom-right");
+    expect(position("center")).toBe("center");
+    expect(position("sideways")).toBe("top-center");
+    expect(position(undefined)).toBe("top-center");
+  });
+});

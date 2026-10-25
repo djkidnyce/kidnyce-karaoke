@@ -684,9 +684,6 @@ td {
 /* Kid Nyce: the singer's countdown for a song's last seconds (end-countdown.js). */
 #kn-end-countdown {
   position: fixed;
-  top: 3vh;
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 60;
   min-width: 9vw;
   padding: 0.6vh 2vw;
@@ -703,3 +700,11 @@ td {
   pointer-events: none;
 }
 #kn-end-countdown.is-final { color: var(--kn-ink); background: var(--kn-glow-break); }
+/* Where it sits: Settings, Splash screen. */
+#kn-end-countdown.pos-top-left { top: 3vh; left: 2vw; }
+#kn-end-countdown.pos-top-center { top: 3vh; left: 50%; transform: translateX(-50%); }
+#kn-end-countdown.pos-top-right { top: 3vh; right: 2vw; }
+#kn-end-countdown.pos-center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+#kn-end-countdown.pos-bottom-left { bottom: 4vh; left: 2vw; }
+#kn-end-countdown.pos-bottom-center { bottom: 4vh; left: 50%; transform: translateX(-50%); }
+#kn-end-countdown.pos-bottom-right { bottom: 4vh; right: 2vw; }

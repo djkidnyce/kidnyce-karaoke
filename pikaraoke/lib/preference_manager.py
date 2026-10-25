@@ -86,6 +86,9 @@ class PreferenceManager:
         "show_time_left_to_guests": False,
         # Big countdown on the singer's screen for a song's last seconds; 0 is off
         "end_countdown_seconds": 20,
+        # Where it sits: top-left, top-center, top-right, center, bottom-left,
+        # bottom-center or bottom-right
+        "end_countdown_position": "top-center",
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:
