@@ -216,6 +216,13 @@ screens sit idle between songs. Both play it shuffled, subfolders included (MP3,
 AAC, OGG, Opus, WAV, FLAC, MP4). While the folder is empty, the idle screen plays the
 one bundled track.
 
+## Releases
+
+Each update comes numbered: `main v0.7` is the tested release, `preview v0.5` the
+next features to try. `kidnyce-karaoke status` prints which one is installed, and
+`git describe --tags` in the clone says which one you have checked out. The app
+version carries the same number: `1.23.0+main.0.7`.
+
 ## Commands
 
 Everything below is also in `kidnyce-karaoke help`. Commands that change something
