@@ -243,6 +243,15 @@ check "host logs in through Nginx" bash -c "jq -n --arg p '$PW' '{admin_password
 NEW=$(curl -fs -b "$admin_jar" "${H[@]}" -X POST "$U/api/join_code/rotate" | jq -r .code || true)
 check "host rotates the code" test -n "$NEW" -a "$NEW" != "$CODE"
 check "host sees how many 1980s number ones the library lacks" bash -c "curl -fs -b '$admin_jar' ${H[*]} '$U/api/charts/number_ones/prep?decade=1980' | jq -e '.preview.total > 0 and .preview.in_library >= 0 and .status.running == false' >/dev/null"
+guest2="$WORK/guest2"
+curl -s -c "$guest2" -o /dev/null "${H[@]}" "$U/join/$NEW" || true
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_ends_at --data-urlencode val=23:59 "$U/api/change_preferences" >/dev/null
+check "host sees the time left tonight" bash -c "curl -fs -b '$admin_jar' ${H[*]} $U/api/night | jq -e '.ends_at == \"23:59\" and (.time_left | type) == \"number\" and (.items | type) == \"array\"' >/dev/null"
+check "guests do not, until the host allows it" bash -c "curl -fs -b '$guest2' ${H[*]} $U/api/night | jq -e '. == {show_guests: false}' >/dev/null"
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=show_time_left_to_guests --data-urlencode val=True "$U/api/change_preferences" >/dev/null
+check "then guests see it too" bash -c "curl -fs -b '$guest2' ${H[*]} $U/api/night | jq -e '.show_guests == true and .ends_at == \"23:59\"' >/dev/null"
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=show_time_left_to_guests --data-urlencode val=False "$U/api/change_preferences" >/dev/null
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_ends_at --data-urlencode val= "$U/api/change_preferences" >/dev/null
 check "guests cannot start a library prep" bash -c "test \"\$(curl -s -o /dev/null -w '%{http_code}' -b '$jar' ${H[*]} -X POST -H 'Content-Type: application/json' -d '{\"decade\": 1980}' $U/api/charts/number_ones/prep)\" != 200"
 check "old guest cookie is locked out" bash -c "curl -s -b '$jar' -o /dev/null -w '%{redirect_url}' ${H[*]} $U/ | grep -q '/join$'"
 check "QR now carries the new code" bash -c "curl -fs http://127.0.0.1:$PORT/api/display/state | jq -e '.join.code == \"$NEW\"' >/dev/null"

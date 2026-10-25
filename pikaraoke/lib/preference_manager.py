@@ -78,6 +78,12 @@ class PreferenceManager:
         "join_via_internet": False,
         # Small host address in a corner of the screens
         "show_host_address": True,
+        # When the night ends, "HH:MM" on the Pi's clock; empty for no end
+        "night_ends_at": "",
+        # Seconds between one singer's song and the next, on top of the splash delay
+        "changeover_seconds": 30,
+        # Show guests the time left and which songs may not fit
+        "show_time_left_to_guests": False,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:

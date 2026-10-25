@@ -1,5 +1,6 @@
 """Core karaoke engine for managing songs, queue, and playback."""
 
+import datetime
 import logging
 import os
 import socket
@@ -13,11 +14,13 @@ import qrcode
 from flask_babel import _
 from qrcode.image.pure import PyPNGImage
 
+from pikaraoke.lib import night_plan
 from pikaraoke.lib.display_hardware import KioskReport, detect_board
 from pikaraoke.lib.download_manager import DownloadManager
 from pikaraoke.lib.events import EventSystem
 from pikaraoke.lib.ffmpeg import (
     get_ffmpeg_version,
+    get_media_duration,
     is_transpose_enabled,
     supports_hardware_h264_encoding,
 )
@@ -352,6 +355,56 @@ class Karaoke:
             result = self._scanner.scan(self.download_path)
             self._apply_scan_result(result)
 
+    def _song_seconds(self, path: str) -> float | None:
+        """A queued song's length: from the database, else probed once and kept."""
+        known = self._durations.get(path)
+        if known is not None:
+            return known
+        stored = self.db.get_durations([path]).get(path)
+        if stored is None:
+            probed = get_media_duration(path)
+            if probed is None:
+                return None
+            stored = int(round(probed))
+            try:
+                self.db.set_duration(path, stored)
+            except Exception as e:  # a read only database must not break the estimate
+                logging.debug(f"Could not store the duration of {path}: {e}")
+        self._durations[path] = stored
+        return stored
+
+    def night_plan(self) -> dict:
+        """Time left tonight and which queued songs fit (lib/night_plan.py)."""
+        prefs = self.preferences
+        now = datetime.datetime.now()
+        pc = self.playback_controller
+        playing_left = 0.0
+        if pc.now_playing:
+            length = pc.now_playing_duration or self._song_seconds(pc.now_playing_filename or "")
+            position = pc.now_playing_position or 0.0
+            playing_left = max(0.0, (length or night_plan.DEFAULT_SONG_SECONDS) - position)
+        if self.intermission.is_active:
+            payload = self.intermission.as_payload() or {}
+            playing_left += float(payload.get("remaining_seconds") or 0)
+        result = night_plan.plan(
+            now=now,
+            ends_at=night_plan.end_of_night(prefs.get_or_default("night_ends_at"), now),
+            queue=list(self.queue_manager.queue),
+            seconds_of=self._song_seconds,
+            playing_left=playing_left,
+            playing=bool(pc.now_playing),
+            changeover=float(prefs.get_or_default("changeover_seconds") or 0)
+            + float(prefs.get_or_default("splash_delay") or 0),
+            breaks=night_plan.BreakRule(
+                enabled=bool(prefs.get_or_default("enable_intermission")),
+                every=int(prefs.get_or_default("intermission_every") or 1),
+                minutes=float(prefs.get_or_default("intermission_minutes") or 0),
+                singers_since_break=self.intermission.singers_since_break,
+            ),
+        )
+        result["show_guests"] = prefs.get_or_default("show_time_left_to_guests") is True
+        return result
+
     def _busy_for_library_prep(self) -> bool:
         """A song playing or any download under way: library prep waits."""
         dm = self.download_manager
@@ -388,6 +441,7 @@ class Karaoke:
             get_youtube_id=lambda path: self.db.get_song_identity(path)[1],
         )
         self.number_ones = NumberOnes(self.db)
+        self._durations: dict[str, int] = {}
         # The download manager is built after this, so every hook reads it late.
         self.library_prep = LibraryPrep(
             self.number_ones,

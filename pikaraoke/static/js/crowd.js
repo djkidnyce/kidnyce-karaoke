@@ -45,6 +45,15 @@
     if (!state.queue.length) {
       $list.append($("<li class='queue-empty'>").text(t.emptyQueue));
     }
+    const night = state.night;
+    if (night) {
+      const minutes = Math.max(0, Math.round(night.time_left / 60));
+      const left = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+      const late = night.late_count ? ` · ${t.nightLate.replace("{count}", night.late_count)}` : "";
+      $("#night-left").text(t.nightLeft.replace("{left}", left) + late);
+    } else {
+      $("#night-left").text("");
+    }
     const extra = state.queue_length - state.queue.length;
     $("#queue-more").text(extra > 0 ? t.more.replace("{count}", extra) : "");
 

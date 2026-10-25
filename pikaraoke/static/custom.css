@@ -668,3 +668,14 @@ td {
   pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* Kid Nyce: songs that may not fit before the night ends (night.js). */
+#auto-refresh tr.night-late { opacity: 0.55; }
+#auto-refresh tr.night-cut td {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--kn-gold);
+  border-top: 2px dashed var(--kn-gold);
+  padding: 4px;
+}

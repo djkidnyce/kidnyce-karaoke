@@ -204,8 +204,14 @@ page.
 | Arrive | Join the venue WiFi (or plug in Ethernet). The DNS record updates within 5 minutes. Run `kidnyce-karaoke doctor`. |
 | Start | Settings, Sessions: start a session named for the night. Each boot gives a new join code (Settings, Join code, or `code-on-boot off` to keep it). If you skip the session, the first song starts one and keeps the code guests already scanned. |
 | Breaks | Home page, Hosting: "Break before next singer", or turn breaks on in Settings, Intermission. |
+| Time left | Settings, Queue: "Night ends at". The queue page then shows the time left and puts a line before the songs that may not fit, counting each song's real length, the changeover between singers and break music. "Show guests the time left" puts it on their queue page and the room screen too. |
 | Trouble guest | `sudo kidnyce-karaoke new-code`: every phone has to scan again. |
 | End | End the session. The code rotates, so last night's phones are locked out. |
+
+Before a gig, fill the library without queueing anything: on Add New, **Save for later**
+saves one song; on Charts, pick a decade and **Download the 1980s number ones** saves
+every number one of that decade you do not have yet (preview branch). It works one
+song at a time and pauses while anyone sings.
 
 Drop songs into `/var/lib/kidnyce-karaoke/songs` and break music into
 `/var/lib/kidnyce-karaoke/music` over SFTP. Your login was added to the group that owns

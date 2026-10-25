@@ -34,6 +34,7 @@ def karaoke(tmp_path):
         url="https://karaoke.djkidnyce.com",
         guest_url=lambda: "https://karaoke.djkidnyce.com",
         preferences=SimpleNamespace(get_or_default=lambda key: None),
+        night_plan=lambda: {"show_guests": False, "time_left": None},
         qr_version=1,
         queue_manager=SimpleNamespace(queue=[{"title": "Song", "user": "Ana", "file": "x"}]),
         request_stats=stats,
