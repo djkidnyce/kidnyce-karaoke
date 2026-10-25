@@ -655,3 +655,16 @@ td {
   --kn-break-scrim-in: rgba(40, 10, 60, 0.85);
   --kn-break-scrim-out: rgba(0, 0, 0, 0.92);
 }
+
+/* Kid Nyce: the host address in small print on the screens (host-address.js). */
+#kn-host-address {
+  position: fixed;
+  right: 0.6vw;
+  bottom: 0.4vh;
+  z-index: 50;
+  font-size: max(11px, 0.7vw);
+  color: var(--kn-muted);
+  opacity: 0.7;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}

@@ -100,10 +100,20 @@ for song in "$SONG_A" "$SONG_B"; do
 done
 chown "$APP_USER:$APP_USER" "$SONG_A" "$SONG_B"
 mapfile -t EXEC < <(sed -n '/^ExecStart=/,/PIKARAOKE_EXTRA_ARGS/p' /etc/systemd/system/kidnyce-karaoke.service |
-    sed 's/^ExecStart=//; s/\\$//; /PIKARAOKE_EXTRA_ARGS/d' | xargs -n1)
-(cd "$DATA_DIR" && runuser -u "$APP_USER" -- env HOME="$DATA_DIR" PATH="$PREFIX/bin:$PREFIX/venv/bin:/usr/bin:/bin" \
-    "${EXEC[@]}" >"$WORK/app.log" 2>&1) &
-APP_PID=$!
+    sed 's/^ExecStart=//; s/\\$//; /PIKARAOKE_EXTRA_ARGS/d; /PIKARAOKE_PUBLIC_ARGS/d' | xargs -n1)
+# The app as systemd would run it, plus any arguments given here.
+start_app() {
+    (cd "$DATA_DIR" && runuser -u "$APP_USER" -- env HOME="$DATA_DIR" PATH="$PREFIX/bin:$PREFIX/venv/bin:/usr/bin:/bin" \
+        "${EXEC[@]}" "$@" >>"$WORK/app.log" 2>&1) &
+    APP_PID=$!
+}
+restart_app() {
+    pkill -f "^$PREFIX/venv/bin/python" 2>/dev/null || true
+    sleep 2
+    start_app "$@"
+    for _ in $(seq 1 60); do curl -fs "http://127.0.0.1:$PORT/api/healthz" >/dev/null && break; sleep 1; done
+}
+start_app
 nginx -t -q
 nginx
 for _ in $(seq 1 60); do curl -fs "http://127.0.0.1:$PORT/api/healthz" >/dev/null && break; sleep 1; done
@@ -290,6 +300,78 @@ check "second install run succeeds and keeps the password" bash -c "
 check "installer --screens dual reaches the app" bash -c "kidnyce-karaoke screens | grep -q 'Setup:  dual'"
 check "a git clone builds and installs the app wheel" bash -c "grep -q 'built pikaraoke-' '$WORK/install2.out' && test -f '$CLONE'/dist/pikaraoke-*.whl"
 kidnyce-karaoke screens auto >/dev/null
+
+echo "== Internet guests through a Cloudflare Tunnel (mock API, no real cloudflared)"
+ZONE=${DOMAIN#*.}
+THOST="karaoke-test.$ZONE"
+python3 "$HERE/mock_cloudflare.py" "$WORK/mock-port" &
+MOCK_PID=$!
+for _ in $(seq 1 20); do [[ -s $WORK/mock-port ]] && break; sleep 0.5; done
+MOCK="http://127.0.0.1:$(cat "$WORK/mock-port")"
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import mock_cloudflare; print(mock_cloudflare.TOKEN)' "$HERE" >"$WORK/cf.token"
+# Stands in for the real package, which needs Cloudflare's apt repository.
+printf '#!/bin/sh\necho "cloudflared version 2025.9.1 (built 2025-09-22)"\n' >/usr/local/bin/cloudflared
+chmod 755 /usr/local/bin/cloudflared
+tunnel_install() {
+    "$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk --no-ddns --dns-provider hook \
+        --dns-auth-hook "$WORK/auth-hook" --dns-cleanup-hook "$WORK/cleanup-hook" \
+        --acme-server https://127.0.0.1:14000/dir --acme-ca-bundle "$ACME_CA" \
+        --cf-token-file "$WORK/cf.token" --cf-api-base "$MOCK/client/v4" "$@" 3>/dev/null
+}
+if tunnel_install --tunnel "$THOST" >"$WORK/install-tunnel.out" 2>&1; then
+    pass "installer sets up the tunnel"
+else
+    fail "installer sets up the tunnel: $(tail -n 3 "$WORK/install-tunnel.out" | tr '
+' ' ')"
+fi
+mock_state=$(curl -fs "$MOCK/state" || echo '{}')
+check "Cloudflare got one tunnel routed to the loopback server" jq -e --arg h "$THOST"     '.result.tunnels | length == 1' <<<"$mock_state"
+# shellcheck disable=SC2016 # jq variables, not shell ones
+check "only the tunnel name goes to the Pi" jq -e --arg h "$THOST"     '.result.config.config.ingress == [{hostname: $h, service: "http://127.0.0.1:8081", originRequest: {}}, {service: "http_status:404"}]' <<<"$mock_state"
+# shellcheck disable=SC2016
+check "a proxied CNAME for the tunnel name" jq -e --arg h "$THOST"     '.result.records[0] | .type == "CNAME" and .name == $h and .proxied == true' <<<"$mock_state"
+check "tunnel token saved for root only" test "$(stat -c %a /etc/kidnyce-karaoke/tunnel.token 2>/dev/null)" = 600
+check "cloudflared service reads the token from a credential" grep -q 'run --token-file %d/tunnel-token' /etc/systemd/system/kidnyce-karaoke-tunnel.service
+nginx -s reload
+sleep 1
+# shellcheck source=/dev/null
+PIKARAOKE_PUBLIC_ARGS=$(sed -n "s/^PIKARAOKE_PUBLIC_ARGS=//p" /etc/kidnyce-karaoke/public.env)
+# shellcheck disable=SC2086
+restart_app $PIKARAOKE_PUBLIC_ARGS
+listeners=$(ss -ltn)
+check "tunnel server listens on loopback only" bash -c "grep -q '127.0.0.1:8081 ' <<<'$listeners' && ! grep -Eq '(0\.0\.0\.0|\*|\[::\]):8081 ' <<<'$listeners'"
+T="http://127.0.0.1:8081"
+# What cloudflared sends: the tunnel name and the phone's real address.
+tcurl() { curl -s -H "Host: $THOST" -H "CF-Connecting-IP: ${PHONE:-203.0.113.7}" "$@"; }
+login_json=$(jq -n --arg p "$PW" '{admin_password: $p}')
+check "a guest on cellular gets the join page" test "$(tcurl -o /dev/null -w '%{http_code}' "$T/join")" = 200
+check "host login is refused from the internet" test "$(tcurl -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d "$login_json" "$T/api/auth")" = 403
+check "no host controls from the internet" test "$(tcurl -o /dev/null -w '%{http_code}' -X POST "$T/api/join_code/rotate")" != 200
+check "a venue client cannot mark itself as internet" bash -c "curl -fs ${H[*]} -H 'X-Kidnyce-Public: 0' -H 'Content-Type: application/json' -d '$login_json' $U/api/auth | jq -e .authenticated >/dev/null"
+codes_a=$(for _ in $(seq 1 10); do PHONE=198.51.100.1 tcurl -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json' -d '{"code":"ZZZZZZ"}' "$T/api/join"; done | sort | uniq -c | tr '
+' ' ')
+code_b=$(PHONE=198.51.100.2 tcurl -o /dev/null -w '%{http_code}' "$T/join")
+check "join limits count each phone, not the tunnel ($codes_a, another phone: $code_b)" bash -c "grep -q 429 <<<'$codes_a' && test '$code_b' = 200"
+join_url() { curl -fs "http://127.0.0.1:$PORT/api/display/state" | jq -r '.join.join_url'; }
+check "QR stays on the venue name by default" grep -q "^https://$DOMAIN/join/" <<<"$(join_url)"
+kidnyce-karaoke join-from internet >/dev/null
+check "join-from internet puts the tunnel name in the QR code" grep -q "^https://$THOST/join/" <<<"$(join_url)"
+kidnyce-karaoke join-from venue >/dev/null
+check "join-from venue puts it back" grep -q "^https://$DOMAIN/join/" <<<"$(join_url)"
+check "the screens get the host address" bash -c "curl -fs http://127.0.0.1:$PORT/api/display/state | jq -e '.host.show == true and .host.url == "https://$DOMAIN"' >/dev/null"
+if tunnel_install --no-tunnel >"$WORK/install-notunnel.out" 2>&1 &&
+    [[ ! -e /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf && ! -e /etc/kidnyce-karaoke/tunnel.env && ! -e /etc/kidnyce-karaoke/public.env ]] &&
+    curl -fs "$MOCK/state" | jq -e '.result.tunnels == [] and .result.records == []' >/dev/null; then
+    pass "--no-tunnel removes it here and at Cloudflare"
+else
+    fail "--no-tunnel removes it here and at Cloudflare: $(tail -n 3 "$WORK/install-notunnel.out" | tr '
+' ' ')"
+fi
+nginx -s reload
+restart_app
+kill "$MOCK_PID" 2>/dev/null
+rm -f /usr/local/bin/cloudflared
 
 echo "== Screens on Xorg with virtual outputs"
 if [[ -n ${CHROME:-} ]] && command -v Xorg >/dev/null && [[ -f /usr/lib/xorg/modules/drivers/dummy_drv.so ]]; then

@@ -47,6 +47,8 @@ class LoginOutcome:
     granted: bool
     # Seconds to wait when the caller is throttled; None when it is not.
     retry_after: float | None = None
+    # From the internet: host login works on the venue network only.
+    refused: bool = False
 
     @property
     def throttled(self) -> bool:
@@ -60,8 +62,13 @@ def log_in(password: str) -> LoginOutcome:
     status code. The throttle is consulted before the password hash, so a locked-out
     flood costs a dict lookup rather than the deliberately slow PBKDF2 per attempt.
     """
+    from pikaraoke.lib.guest_gate import client_address, is_public_request
+
+    if is_public_request():
+        return LoginOutcome(granted=False, refused=True)
     throttle = get_login_throttle()
-    key = f"admin:{request.remote_addr or 'unknown'}"
+    # Behind Nginx every caller is 127.0.0.1; the real client is in X-Real-IP.
+    key = f"admin:{client_address()}"
     retry_after = throttle.retry_after(key)
     if retry_after is not None:
         return LoginOutcome(granted=False, retry_after=retry_after)

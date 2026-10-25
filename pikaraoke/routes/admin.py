@@ -172,7 +172,10 @@ def expand_fs():
 def auth(form):
     """Authenticate as admin from the browser form."""
     outcome = log_in(form["admin_password"])
-    if outcome.granted:
+    if outcome.refused:
+        # MSG: Message shown when someone tries the host login from the internet address.
+        flash(_("Host login works on the venue network only."), "is-danger")
+    elif outcome.granted:
         # MSG: Message shown after logging in as admin successfully
         flash(_("Admin mode granted!"), "is-success")
     elif outcome.throttled:

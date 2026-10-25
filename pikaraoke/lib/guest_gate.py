@@ -7,6 +7,9 @@ Three kinds of caller get through:
    X-Real-IP, so a loopback caller without that header can only be local.
 2. The host, once logged in with the admin password.
 3. A guest whose signed session cookie holds the current join code.
+
+A request from the internet (through the Cloudflare Tunnel) is only ever a
+guest: Nginx marks it with X-Kidnyce-Public, and host controls refuse it.
 """
 
 import ipaddress
@@ -53,6 +56,18 @@ def client_address() -> str:
     return forwarded or request.remote_addr or "unknown"
 
 
+def is_public_request() -> bool:
+    """Arrived from the internet through the tunnel.
+
+    Only the Nginx server that the tunnel feeds sets this header; the venue
+    network server always strips it, so it cannot be faked to gain anything.
+    """
+    try:
+        return request.headers.get("X-Kidnyce-Public") == "1"
+    except RuntimeError:  # outside a request
+        return False
+
+
 def is_local_display() -> bool:
     """True for a browser running on the Pi itself, such as the two kiosk screens."""
     if any(request.headers.get(h) for h in _PROXY_HEADERS):
@@ -66,7 +81,7 @@ def is_local_display() -> bool:
 def is_logged_in_host() -> bool:
     """A real admin login. Unlike is_admin(), never true just because no password is set."""
     auth = current_app.config.get("ADMIN_AUTH")
-    if auth is None or not auth.is_password_set():
+    if auth is None or not auth.is_password_set() or is_public_request():
         return False
     return session.get("admin") == auth.session_token
 

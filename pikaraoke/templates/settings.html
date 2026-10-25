@@ -380,6 +380,10 @@
 					<span>{# MSG: Checkbox label which enable/disables the digital clock on the splash screen #} {% trans %}Show the clock{% endtrans %}</span>
 					<input id="pref-splash-clock" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="show_splash_clock" {% if show_splash_clock == True %}checked{% endif %}>
 				</label>
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>{# MSG: Checkbox: small print with the Pi's network address in a corner of the screens. #} {% trans %}Show the Pi's address in small print{% endtrans %}</span>
+					<input id="pref-show-host-address" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="show_host_address" {% if show_host_address == True %}checked{% endif %}>
+				</label>
 				<div class="panel-block px-5 py-3 is-justify-content-space-between">
 					<label for="pref-screensaver-timeout">
 						{# MSG: Numberbox label for setting the inactive delay before showing the screensaver #} {% trans %}Screensaver after (seconds){% endtrans %}
@@ -415,6 +419,16 @@
 					</span>
 					<input id="pref-new-join-code-on-start" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="new_join_code_on_start" {% if new_join_code_on_start == True %}checked{% endif %}>
 				</label>
+				{% if public_url %}
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>
+						{# MSG: Checkbox: the QR code sends phones to the internet address, so guests can join on cellular data. #} {% trans %}QR code works from anywhere (cellular data){% endtrans %}
+						{# MSG: Explains the internet join option. {public} and {local} are web addresses. #}
+						<span class="is-block is-size-7 has-text-grey-light">{{ _('On: phones join through %(public)s, on WiFi or cellular. Off: %(local)s, venue network only. Host login and Settings stay on the venue network either way.', public=public_url, local=local_url) }}</span>
+					</span>
+					<input id="pref-join-via-internet" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="join_via_internet" {% if join_via_internet == True %}checked{% endif %}>
+				</label>
+				{% endif %}
 			</div>
 
 			<hr class="my-0">

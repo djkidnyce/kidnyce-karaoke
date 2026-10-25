@@ -12,6 +12,7 @@ from marshmallow import Schema, fields
 
 from pikaraoke.lib.auth import log_in, public
 from pikaraoke.lib.current_app import get_admin_auth, is_admin
+from pikaraoke.lib.guest_gate import is_public_request
 
 auth_api_bp = Blueprint("auth_api", __name__)
 
@@ -38,6 +39,8 @@ def login(credentials):
     The cookie comes back in `Set-Cookie`, which browsers hide from scripts, so
     this console cannot show it. Call a host-only endpoint to confirm it worked.
     """
+    if is_public_request():
+        return jsonify({"error": "Host login works on the venue network only"}), 403
     if not get_admin_auth().is_password_set():
         # Everyone is an admin already; a 401 here would read as a locked door.
         return jsonify({"authenticated": True})

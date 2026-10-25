@@ -119,6 +119,7 @@ class Karaoke:
         socketio=None,
         streaming_format: str = "hls",
         url: str | None = None,
+        public_url: str | None = None,
         url_base_path: str = "",
         youtubedl_proxy: str | None = None,
         # Preference parameters (defaults from PreferenceManager.DEFAULTS)
@@ -238,6 +239,7 @@ class Karaoke:
         self.url_override = url
         self.url_base_path = url_base_path
         self.url = self.get_url()
+        self.public_url = public_url.rstrip("/") if public_url else None
 
         # Must exist before preferences are applied: the keep_awake setter uses it.
         self._keep_awake = KeepAwake()
@@ -530,6 +532,12 @@ class Karaoke:
             output += f"  {key}: {value}\n"
         logging.debug("\n\n" + output)
 
+    def guest_url(self) -> str:
+        """The address guests are given: the internet one when the host chose it."""
+        if self.public_url and self.preferences.get_or_default("join_via_internet") is True:
+            return self.public_url
+        return self.url
+
     def generate_qr_code(self) -> None:
         """Generate a QR code image for the web interface URL."""
         logging.debug("Generating URL QR code")
@@ -538,7 +546,8 @@ class Karaoke:
             box_size=1,
             border=4,
         )
-        qr.add_data(self.join_codes.join_url(self.url) if self.require_join_code else self.url)
+        guest = self.guest_url()
+        qr.add_data(self.join_codes.join_url(guest) if self.require_join_code else guest)
         qr.make()
         img = qr.make_image(image_factory=PyPNGImage)
         # Use writable data directory instead of program directory.

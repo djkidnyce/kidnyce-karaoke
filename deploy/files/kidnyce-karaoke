@@ -17,6 +17,9 @@
 #   kidnyce-karaoke wifi            join a venue's WiFi from the console
 #   kidnyce-karaoke mode [desktop|karaoke]     keep the desktop, or boot to the screens (reboots)
 #   kidnyce-karaoke desktop-autostart on|off   desktop mode: open the screens at login
+#   kidnyce-karaoke net-fallback on|off        desktop when there is no network at boot
+#   kidnyce-karaoke tunnel [status|restart|http2|auto]   internet access for guests
+#   kidnyce-karaoke join-from internet|venue   which address the QR code carries
 #   kidnyce-karaoke logs [app|nginx|screens|ddns]
 #   kidnyce-karaoke restart [app|screens|all]
 #   kidnyce-karaoke update-ytdlp    pull the newest yt-dlp now
@@ -254,6 +257,72 @@ cmd_mode() {
     systemctl reboot
 }
 
+# Preview features. Each changes nothing until turned on.
+cmd_net_fallback() {
+    need_root net-fallback
+    local env=$ETC_DIR/kiosk.env value
+    case "${1:-}" in
+        on) value=1 ;;
+        off) value=0 ;;
+        *) echo "Usage: kidnyce-karaoke net-fallback on|off" >&2; exit 1 ;;
+    esac
+    if grep -q '^NET_FALLBACK=' "$env"; then
+        sed -i "s/^NET_FALLBACK=.*/NET_FALLBACK=$value/" "$env"
+    else
+        echo "NET_FALLBACK=$value" >>"$env"
+    fi
+    if ((value)); then
+        systemctl enable kidnyce-karaoke-netfallback.service >/dev/null 2>&1
+        echo "On. At boot with no network address the desktop shows; the screens start once connected."
+    else
+        systemctl disable kidnyce-karaoke-netfallback.service >/dev/null 2>&1
+        echo "Off. The screens start at boot whether or not there is a network."
+    fi
+}
+
+cmd_tunnel() {
+    need_root tunnel
+    if [[ ! -f $ETC_DIR/tunnel.env ]]; then
+        echo "No tunnel. Set one up with the installer: --tunnel karaoke-test.$(sed -n 's/^ZONE=//p' "$ETC_DIR/ddns.env" 2>/dev/null || echo example.com)"
+        return
+    fi
+    case "${1:-status}" in
+        status)
+            echo "cloudflared: $(systemctl is-active kidnyce-karaoke-tunnel.service 2>/dev/null)"
+            /usr/local/sbin/kidnyce-karaoke-tunnel status || true
+            ;;
+        restart) systemctl restart kidnyce-karaoke-tunnel.service; echo "cloudflared restarted." ;;
+        http2)
+            # For venues that block UDP 7844 (QUIC).
+            echo "TUNNEL_TRANSPORT_PROTOCOL=http2" >"$ETC_DIR/tunnel-run.env"
+            systemctl restart kidnyce-karaoke-tunnel.service
+            echo "cloudflared now uses HTTP/2 over TCP 7844."
+            ;;
+        auto)
+            rm -f "$ETC_DIR/tunnel-run.env"
+            systemctl restart kidnyce-karaoke-tunnel.service
+            echo "cloudflared picks QUIC or HTTP/2 itself again."
+            ;;
+        *) echo "Usage: kidnyce-karaoke tunnel [status|restart|http2|auto]" >&2; exit 1 ;;
+    esac
+}
+
+cmd_join_from() {
+    need_root join-from
+    case "${1:-}" in
+        internet)
+            [[ -f $ETC_DIR/tunnel.env ]] || { echo "No tunnel set up, so the QR code stays on the venue network." >&2; exit 1; }
+            set_pref join_via_internet True
+            echo "The QR code now works on cellular too: https://$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$ETC_DIR/tunnel.env")"
+            ;;
+        venue)
+            set_pref join_via_internet False
+            echo "The QR code now uses https://$DOMAIN (venue network only)."
+            ;;
+        *) echo "Usage: kidnyce-karaoke join-from internet|venue" >&2; exit 1 ;;
+    esac
+}
+
 cmd_desktop_autostart() {
     need_root desktop-autostart
     case "${1:-}" in
@@ -409,6 +478,9 @@ case "${1:-status}" in
     screens) cmd_screens "${2:-show}" "${3:-}" ;;
     code-on-boot) cmd_code_on_boot "${2:-}" ;;
     desktop-autostart) cmd_desktop_autostart "${2:-}" ;;
+    net-fallback) cmd_net_fallback "${2:-}" ;;
+    tunnel) cmd_tunnel "${2:-status}" ;;
+    join-from) cmd_join_from "${2:-}" ;;
     audio) cmd_audio "${2:-show}" "${3:-}" ;;
     wifi) cmd_wifi ;;
     mode) cmd_mode "${2:-}" ;;
@@ -416,6 +488,6 @@ case "${1:-status}" in
     restart) cmd_restart "${2:-all}" ;;
     update-ytdlp) need_root update-ytdlp; systemctl start kidnyce-karaoke-ytdlp; "$PREFIX/venv/bin/python" -I -m yt_dlp --version ;;
     ddns) need_root ddns; /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record checked." ;;
-    -h | --help | help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
+    -h | --help | help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) echo "Unknown command: $1 (try: kidnyce-karaoke help)" >&2; exit 1 ;;
 esac

@@ -90,4 +90,8 @@ def settings():
         new_join_code_on_start=k.preferences.get_or_default("new_join_code_on_start"),
         audio_level=k.preferences.get_or_default("audio_level"),
         desktop_screens_on_login=k.preferences.get_or_default("desktop_screens_on_login"),
+        join_via_internet=k.preferences.get_or_default("join_via_internet"),
+        show_host_address=k.preferences.get_or_default("show_host_address"),
+        public_url=k.public_url,
+        local_url=k.url,
     )

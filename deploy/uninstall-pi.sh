@@ -19,7 +19,14 @@ if [[ -f $ETC_DIR/install.env ]]; then
 fi
 
 units=(kidnyce-karaoke.service kidnyce-karaoke-ddns.timer kidnyce-karaoke-ddns.service
-    kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service)
+    kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service
+    kidnyce-karaoke-tunnel.service kidnyce-karaoke-netfallback.service)
+# The tunnel and its DNS record at Cloudflare, while the token is still here.
+if [[ -f $ETC_DIR/tunnel.env && -x /usr/local/sbin/kidnyce-karaoke-tunnel ]]; then
+    systemctl stop kidnyce-karaoke-tunnel.service 2>/dev/null || true
+    /usr/local/sbin/kidnyce-karaoke-tunnel remove ||
+        echo "Could not delete the Cloudflare Tunnel; delete it in the Zero Trust dashboard."
+fi
 for unit in "${units[@]}"; do
     systemctl disable --now "$unit" 2>/dev/null || true
     rm -f "/etc/systemd/system/$unit"
@@ -31,7 +38,8 @@ systemctl daemon-reload
 nft delete table inet kidnyce_fw 2>/dev/null || true
 
 rm -f /etc/nginx/sites-enabled/kidnyce-karaoke.conf /etc/nginx/sites-available/kidnyce-karaoke.conf \
-    /etc/nginx/snippets/kidnyce-proxy.conf
+    /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf /etc/nginx/sites-available/kidnyce-karaoke.tunnel.conf \
+    /etc/nginx/snippets/kidnyce-proxy.conf /etc/nginx/snippets/kidnyce-common.conf
 if [[ ! -e /etc/nginx/sites-enabled/default && -f /etc/nginx/sites-available/default ]]; then
     ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 fi
@@ -43,7 +51,8 @@ rm -f /usr/share/applications/kidnyce-karaoke-{screens,stop,host}.desktop \
     /usr/share/icons/hicolor/256x256/apps/kidnyce-karaoke.png /home/*/Desktop/kidnyce-karaoke-*.desktop
 pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
-rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns
+rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns \
+    /usr/local/sbin/kidnyce-karaoke-tunnel /usr/local/sbin/kidnyce-karaoke-netfallback
 rm -rf "$PREFIX" /var/lib/kidnyce-karaoke-ddns
 
 if ((PURGE)); then
@@ -54,7 +63,7 @@ if ((PURGE)); then
     userdel --remove "$KIOSK_USER" 2>/dev/null || true
     echo "Removed everything, including songs and settings."
 else
-    rm -f "$ETC_DIR/cloudflare.token"
+    rm -f "$ETC_DIR/cloudflare.token" "$ETC_DIR/tunnel.token" "$ETC_DIR/tunnel.env" "$ETC_DIR/public.env"
     echo "Removed. Kept $DATA_DIR (songs, music, settings) and $ETC_DIR."
     echo "Use --purge to delete those, the certificate and the users too."
 fi

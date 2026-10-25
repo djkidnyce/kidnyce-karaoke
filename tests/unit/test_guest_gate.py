@@ -32,6 +32,8 @@ def karaoke(tmp_path):
     k = SimpleNamespace(
         join_codes=JoinCodeManager(db, EventSystem(), lambda: None),
         url="https://karaoke.djkidnyce.com",
+        guest_url=lambda: "https://karaoke.djkidnyce.com",
+        preferences=SimpleNamespace(get_or_default=lambda key: None),
         qr_version=1,
         queue_manager=SimpleNamespace(queue=[{"title": "Song", "user": "Ana", "file": "x"}]),
         request_stats=stats,

@@ -320,6 +320,12 @@ stop_desktop() {
     rm -f "$PID_FILE"
 }
 
+# A real address from a router, as kidnyce-karaoke-netfallback checks it.
+has_address() {
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | grep -qv '^169\.254\.' &&
+        [[ -n $(ip -4 route show default 2>/dev/null) ]]
+}
+
 # At desktop login, open the screens only when the host turned that on.
 autostart_wanted() {
     curl --silent --fail --max-time 3 --get \
@@ -362,6 +368,12 @@ main() {
         log "desktop login: opening the screens is off in Settings, Screens"
         rm -f "$PID_FILE"
         exit 0
+    fi
+    # With the network fallback on, the desktop is where a WiFi network gets
+    # picked, so the screens wait for an address before covering it.
+    if ((AUTOSTART)) && [[ ${NET_FALLBACK:-0} == 1 ]] && ! has_address; then
+        log "desktop login: waiting for a network address before opening the screens"
+        until has_address; do sleep 5; done
     fi
     trap 'stop_all; ((DESKTOP)) && rm -f "$PID_FILE"; exit 0' TERM INT
     ((DESKTOP)) && log "desktop run started"

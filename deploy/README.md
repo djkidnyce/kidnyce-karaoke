@@ -307,6 +307,16 @@ with setup work that needs the full desktop, such as the desktop WiFi menu or
 Bluetooth. It needs Raspberry Pi OS with desktop, not Lite. On Lite, use `wifi` above.
 See [Boot to the screens, or keep the desktop](#boot-to-the-screens-or-keep-the-desktop).
 
+### Preview features
+
+```text
+sudo kidnyce-karaoke tunnel                  tunnel status at Cloudflare
+sudo kidnyce-karaoke tunnel http2|auto       for venues that block UDP 7844
+sudo kidnyce-karaoke join-from internet      QR code works on cellular (needs the tunnel)
+sudo kidnyce-karaoke join-from venue         QR code on the venue network only
+sudo kidnyce-karaoke net-fallback on|off     desktop when there is no network at boot
+```
+
 ### Services and updates
 
 ```text
@@ -339,6 +349,102 @@ The reliable fix for both is your own travel router (GL.iNet and similar): it jo
 the venue WiFi or Ethernet as its uplink, gives the Pi a fixed address, and broadcasts
 your own SSID. Put a DHCP reservation on the Pi and, in the router's DNS settings,
 add `karaoke.kidnyce.com` pointing at it. Guests join your SSID and scan.
+
+## Preview: guests on cellular data (Cloudflare Tunnel)
+
+Off unless you turn it on. It fixes both venue problems above, and lets guests join
+without touching the venue WiFi at all.
+
+How it works: `cloudflared` on the Pi dials out to Cloudflare, and Cloudflare sends
+one internet name, such as `karaoke-test.kidnyce.com`, down that connection to the
+Pi. Nothing is opened on the venue router or the Pi's firewall, so it works behind
+any router, a phone hotspot, or carrier NAT. The Pi still needs some internet: venue
+WiFi, Ethernet, or a hotspot.
+
+What stays the same: `karaoke.kidnyce.com`, its DNS record, its certificate and the QR
+code. The tunnel name is separate, so you can test it without touching what works.
+
+### 1. Let the token manage tunnels
+
+Edit the Cloudflare API token you already use and add a permission:
+**Account, Cloudflare Tunnel, Edit**. Keep **Zone, DNS, Edit** on `kidnyce.com`.
+
+### 2. Install with a test name
+
+```sh
+sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token \
+    --tunnel karaoke-test.kidnyce.com
+```
+
+The installer adds Cloudflare's signed apt repository and installs `cloudflared`. It
+creates a tunnel named `kidnyce-karaoke-karaoke-test` and routes only that name to
+the Pi. It adds a proxied CNAME for the name, and starts the `kidnyce-karaoke-tunnel`
+service. It refuses a name that already has other DNS records.
+
+### 3. Test from a phone on cellular
+
+Turn WiFi off on a phone. Open `https://karaoke-test.kidnyce.com/join`, type the join
+code from the screen, and add a song. Check `sudo kidnyce-karaoke tunnel`: it should
+say healthy with 4 connections.
+
+### 4. Put it in the QR code
+
+Settings, Join code, "QR code works from anywhere", or
+`sudo kidnyce-karaoke join-from internet`. The QR code and the address on the room
+screen switch to the tunnel name within seconds. `join-from venue` switches back.
+
+### Host controls stay local
+
+Host login, Settings and every host action refuse requests that came through the
+tunnel, even with the right password. Run the night from the venue network, or from
+the Pi's address in small print on the screens. A leaked admin password is useless
+from the internet.
+
+### Threat model
+
+| Risk | What stops it |
+| --- | --- |
+| Strangers finding the URL | The join code gate. Without tonight's code a phone sees only the join page. |
+| Guessing the code | Nginx limits each phone to 10 join attempts a minute, and the app locks out repeated failures. Each phone counts on its own, from Cloudflare's CF-Connecting-IP. |
+| Taking over the host controls | Refused from the tunnel: Nginx marks those requests, the app never treats them as the host. A client cannot set or clear the mark itself. |
+| Reaching the Pi directly | Nothing listens for the internet. The tunnel's Nginx server answers on 127.0.0.1:8081 only, and the Pi's public address stays hidden behind Cloudflare. |
+| The tunnel token | Root only on disk (`/etc/kidnyce-karaoke/tunnel.token`), handed to a throwaway service user by systemd. It can only run this tunnel, not edit your account. |
+| Floods | Cloudflare's edge in front, plus the same Nginx rate limits as on the venue network. |
+
+### Venue networks that block it
+
+`cloudflared` needs outbound port 7844: UDP for QUIC, TCP for HTTP/2. If a venue
+blocks UDP, run `sudo kidnyce-karaoke tunnel http2`, and `tunnel auto` to go back.
+
+### Turn it off
+
+```sh
+sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token --no-tunnel
+```
+
+That stops `cloudflared` and deletes the tunnel and its DNS record at Cloudflare. It
+also removes the tunnel's Nginx server and puts the QR code back on the venue name.
+
+## Preview: show the desktop when there is no network
+
+Off unless you turn it on, and only in karaoke mode. At boot the Pi waits up to 45
+seconds for a network address, meaning Ethernet or a known WiFi network with an
+answer from its router. If none comes, it shows the Raspberry Pi desktop so you can
+pick a WiFi network with the mouse. Once it has an address for two checks in a row, it
+waits 10 seconds, closes the desktop and starts the screens.
+
+```sh
+sudo kidnyce-karaoke net-fallback on         # or install with --net-fallback on
+sudo kidnyce-karaoke net-fallback off
+```
+
+`--net-wait 90` changes the wait. Raspberry Pi OS Lite has no desktop, so there it
+only logs and the screens start anyway; use `sudo kidnyce-karaoke wifi`. In desktop
+mode with "open the screens when the desktop starts" on, the screens wait for a
+network address before covering the desktop.
+
+The Pi's address shows in small print in a corner of the screens, or "No network"
+when it has none. Turn it off under Settings, Splash screen.
 
 ## What the installer sets up
 

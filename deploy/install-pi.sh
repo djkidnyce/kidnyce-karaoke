@@ -18,6 +18,9 @@
 #      else one for everything. The host can choose in Settings, Screens.
 #      With --boot desktop the Pi keeps its desktop and the screens open from
 #      a Karaoke Screens icon instead (or at login, if Settings says so).
+#  10. Optional, off unless asked for: a Cloudflare Tunnel so guests on
+#      cellular data can join (--tunnel NAME), and showing the desktop when
+#      the Pi has no network at boot (--net-fallback on).
 #
 # Run it again any time: it is idempotent and keeps your songs, settings,
 # certificate and admin password.
@@ -63,6 +66,12 @@ AUDIO_SET=0
 BOOT_MODE="karaoke"
 BOOT_SET=0
 DESKTOP_AUTOSTART=""
+TUNNEL_HOSTNAME=""
+TUNNEL_OFF=0
+TUNNEL_PORT=8081
+CF_API_BASE=""
+NET_FALLBACK=""
+NET_WAIT_SECONDS=45
 FORCE_HDMI=0
 FIREWALL=1
 DDNS=1
@@ -126,6 +135,14 @@ Options:
                            desktop (keeps the desktop; a Karaoke Screens icon opens them).
                            A rerun keeps the mode in use. Switch later: kidnyce-karaoke mode
   --desktop-autostart on|off  Desktop mode: open the screens at desktop login. Also in Settings.
+  --tunnel NAME            Preview: also serve guests at NAME (such as karaoke-test.kidnyce.com)
+                           through a Cloudflare Tunnel, for phones on cellular data. The
+                           Cloudflare token needs Account, Cloudflare Tunnel, Edit as well.
+                           Host login and Settings never answer on NAME. A rerun keeps it.
+  --no-tunnel              Remove the tunnel, its DNS record and cloudflared's service
+  --net-fallback on|off    Preview: show the desktop when the Pi has no network address
+                           at boot, and start the screens once it has one. A rerun keeps it.
+  --net-wait SECONDS       How long to wait for a network address first (default: $NET_WAIT_SECONDS)
   --force-hdmi             Keep both HDMI outputs on even if a TV is off at boot (edits cmdline.txt)
   --no-firewall            Do not install the nftables firewall
   --no-ddns                Do not keep the DNS record pointed at this Pi
@@ -162,6 +179,11 @@ while [[ $# -gt 0 ]]; do
         --audio) AUDIO_OUT=$2; AUDIO_SET=1; shift ;;
         --boot) BOOT_MODE=$2; BOOT_SET=1; shift ;;
         --desktop-autostart) DESKTOP_AUTOSTART=$2; shift ;;
+        --tunnel) TUNNEL_HOSTNAME=$2; shift ;;
+        --no-tunnel) TUNNEL_OFF=1 ;;
+        --cf-api-base) CF_API_BASE=$2; shift ;;
+        --net-fallback) NET_FALLBACK=$2; shift ;;
+        --net-wait) NET_WAIT_SECONDS=$2; shift ;;
         --force-hdmi) FORCE_HDMI=1 ;;
         --no-firewall) FIREWALL=0 ;;
         --no-ddns) DDNS=0 ;;
@@ -212,7 +234,7 @@ render() {
     text=$(<"$1")
     local name
     for name in DOMAIN PORT PREFIX DATA_DIR ETC_DIR APP_USER KIOSK_USER CERT KEY \
-        LISTEN_HTTP2 HTTP2_DIRECTIVE; do
+        LISTEN_HTTP2 HTTP2_DIRECTIVE TUNNEL_HOSTNAME TUNNEL_PORT; do
         text=${text//@@$name@@/${!name:-}}
     done
     if [[ $text == *@@*@@* ]]; then
@@ -261,6 +283,22 @@ preflight() {
     [[ -z $SCREENS || $SCREENS =~ ^(auto|single|dual)$ ]] || die "--screens must be auto, single or dual"
     [[ $BOOT_MODE =~ ^(karaoke|desktop)$ ]] || die "--boot must be karaoke or desktop"
     [[ -z $DESKTOP_AUTOSTART || $DESKTOP_AUTOSTART =~ ^(on|off)$ ]] || die "--desktop-autostart must be on or off"
+    [[ -z $NET_FALLBACK || $NET_FALLBACK =~ ^(on|off)$ ]] || die "--net-fallback must be on or off"
+    if ! [[ $NET_WAIT_SECONDS =~ ^[0-9]+$ ]] || ((NET_WAIT_SECONDS < 10 || NET_WAIT_SECONDS > 600)); then
+        die "--net-wait must be 10 to 600 seconds"
+    fi
+    # A rerun keeps the tunnel set up earlier, unless --no-tunnel.
+    if [[ -z $TUNNEL_HOSTNAME ]] && ((!TUNNEL_OFF)) && [[ -f $ETC_DIR/tunnel.env ]]; then
+        TUNNEL_HOSTNAME=$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$ETC_DIR/tunnel.env")
+    fi
+    ((TUNNEL_OFF)) && TUNNEL_HOSTNAME=""
+    if [[ -n $TUNNEL_HOSTNAME ]]; then
+        [[ $TUNNEL_HOSTNAME =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "--tunnel: not a valid hostname: $TUNNEL_HOSTNAME"
+        [[ $TUNNEL_HOSTNAME == *."$ZONE" ]] || die "--tunnel: $TUNNEL_HOSTNAME must be inside the zone $ZONE"
+        # The venue name keeps its own DNS record and certificate. Sharing it would
+        # break the venue network path, so the internet name is a separate one.
+        [[ $TUNNEL_HOSTNAME != "$DOMAIN" ]] || die "--tunnel must be a different name from --domain $DOMAIN, such as karaoke-test.$ZONE"
+    fi
 
     # shellcheck source=/dev/null
     source /etc/os-release
@@ -371,7 +409,7 @@ build_wheel_from_source() {
 # ---------------------------------------------------------------- secrets
 CF_TOKEN=""
 read_cloudflare_token() {
-    [[ $DNS_PROVIDER == cloudflare ]] || return 0
+    [[ $DNS_PROVIDER == cloudflare || -n $TUNNEL_HOSTNAME || $TUNNEL_OFF == 1 ]] || return 0
     if [[ -n $CF_TOKEN_FILE ]]; then
         [[ -r $CF_TOKEN_FILE ]] || die "cannot read --cf-token-file $CF_TOKEN_FILE"
         CF_TOKEN=$(tr -d ' \r\n' <"$CF_TOKEN_FILE")
@@ -479,6 +517,7 @@ install_app() {
     run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke" /usr/local/bin/kidnyce-karaoke
     run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-set-admin-password" "$PREFIX/bin/kidnyce-set-admin-password"
     run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-ddns" /usr/local/sbin/kidnyce-karaoke-ddns
+    run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-tunnel" /usr/local/sbin/kidnyce-karaoke-tunnel
     if ((!DRY_RUN)); then
         ok "pikaraoke $("$venv/bin/python" -I -c 'from pikaraoke.version import __version__; print(__version__)'), yt-dlp $("$venv/bin/python" -I -m yt_dlp --version)"
     fi
@@ -668,6 +707,14 @@ configure_nginx() {
     info "nginx ${version:-unknown}"
 
     render "$SCRIPT_DIR/files/nginx-proxy-snippet.conf" | write_file 644 root:root /etc/nginx/snippets/kidnyce-proxy.conf
+    render "$SCRIPT_DIR/files/nginx-common.conf" | write_file 644 root:root /etc/nginx/snippets/kidnyce-common.conf
+    # Internet guests through the tunnel: a loopback only server, only while it is on.
+    if [[ -n $TUNNEL_HOSTNAME ]]; then
+        render "$SCRIPT_DIR/files/nginx-tunnel.conf" | write_file 644 root:root /etc/nginx/sites-available/kidnyce-karaoke.tunnel.conf
+        run ln -sfn /etc/nginx/sites-available/kidnyce-karaoke.tunnel.conf /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf
+    else
+        run rm -f /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf /etc/nginx/sites-available/kidnyce-karaoke.tunnel.conf
+    fi
     # Some installs turn IPv6 off (ipv6.disable=1); Nginx then refuses [::] listeners.
     local strip_v6=(cat)
     if [[ ! -e /proc/net/if_inet6 ]]; then
@@ -713,6 +760,80 @@ EOF
     fi
 }
 
+# ---------------------------------------------------------------- 8b. tunnel
+# cloudflared from Cloudflare's signed apt repository. --token-file needs 2025.4.0.
+install_cloudflared() {
+    local have=""
+    if command -v cloudflared >/dev/null; then
+        have=$(cloudflared --version 2>/dev/null | sed -n 's/.*version \([0-9.]*\).*/\1/p')
+    fi
+    if [[ -n $have ]] && printf '%s\n%s\n' "2025.4.0" "$have" | sort -V -C; then
+        info "cloudflared $have"
+        return
+    fi
+    local arch
+    arch=$(dpkg --print-architecture)
+    [[ $arch == arm64 || $arch == amd64 ]] || die "cloudflared packages exist for arm64 and amd64 only (this is $arch)"
+    run install -d -m 755 /usr/share/keyrings
+    run curl -fsSL -o /usr/share/keyrings/cloudflare-main.gpg https://pkg.cloudflare.com/cloudflare-main.gpg
+    if ((!DRY_RUN)); then
+        info "Cloudflare package key: $(gpg --batch --show-keys --with-colons /usr/share/keyrings/cloudflare-main.gpg 2>/dev/null | awk -F: '/^fpr/ {print $10; exit}')"
+    fi
+    write_file 644 root:root /etc/apt/sources.list.d/cloudflared.sources <<EOF
+Types: deb
+URIs: https://pkg.cloudflare.com/cloudflared
+Suites: any
+Components: main
+Architectures: $arch
+Signed-By: /usr/share/keyrings/cloudflare-main.gpg
+EOF
+    run apt-get update -q
+    apt_install cloudflared
+    ok "cloudflared $(cloudflared --version 2>/dev/null | sed -n 's/.*version \([0-9.]*\).*/\1/p')"
+}
+
+configure_tunnel() {
+    local tenv=$ETC_DIR/tunnel.env
+    if [[ -z $TUNNEL_HOSTNAME ]]; then
+        # Off: undo anything a preview run left behind.
+        [[ -f $tenv || -f /etc/systemd/system/kidnyce-karaoke-tunnel.service ]] || return 0
+        step "Removing the Cloudflare Tunnel"
+        systemctl_do disable --now kidnyce-karaoke-tunnel.service
+        if [[ -f $tenv && -x /usr/local/sbin/kidnyce-karaoke-tunnel ]] && ((!DRY_RUN)); then
+            /usr/local/sbin/kidnyce-karaoke-tunnel remove || warn "could not delete the tunnel at Cloudflare; delete it in the Zero Trust dashboard"
+        fi
+        run rm -f /etc/systemd/system/kidnyce-karaoke-tunnel.service "$tenv" "$ETC_DIR/public.env" "$ETC_DIR/tunnel.token"
+        systemctl_do daemon-reload
+        ok "tunnel removed; guests join on the venue network only"
+        return 0
+    fi
+    step "Cloudflare Tunnel for guests on cellular: https://$TUNNEL_HOSTNAME"
+    install_cloudflared
+    printf '%s\n' "$CF_TOKEN" | write_file 600 root:root "$ETC_DIR/cloudflare.token"
+    write_file 644 root:root "$tenv" <<EOF
+# Written by deploy/install-pi.sh. Read by kidnyce-karaoke-tunnel.
+HOSTNAME_PUBLIC=$TUNNEL_HOSTNAME
+ZONE=$ZONE
+ZONE_ID=$CF_ZONE_ID
+TOKEN_FILE=$ETC_DIR/cloudflare.token
+TUNNEL_NAME=kidnyce-karaoke-${TUNNEL_HOSTNAME%%.*}
+ORIGIN=http://127.0.0.1:$TUNNEL_PORT
+TUNNEL_TOKEN_FILE=$ETC_DIR/tunnel.token
+${CF_API_BASE:+CF_API_BASE=$CF_API_BASE}
+EOF
+    write_file 644 root:root "$ETC_DIR/public.env" <<EOF
+# Written by deploy/install-pi.sh while the tunnel is on.
+PIKARAOKE_PUBLIC_ARGS=--public-url https://$TUNNEL_HOSTNAME
+EOF
+    render "$SCRIPT_DIR/files/kidnyce-karaoke-tunnel.service" | write_file 644 root:root /etc/systemd/system/kidnyce-karaoke-tunnel.service
+    if ((!DRY_RUN)); then
+        /usr/local/sbin/kidnyce-karaoke-tunnel setup || die "Cloudflare Tunnel setup failed (see above). Rerun with --no-tunnel to go back."
+    fi
+    systemctl_do daemon-reload
+    systemctl_do enable kidnyce-karaoke-tunnel.service
+    ok "https://$TUNNEL_HOSTNAME reaches this Pi through the tunnel (guests only)"
+}
+
 # ---------------------------------------------------------------- 9. firewall
 configure_firewall() {
     ((FIREWALL)) || return 0
@@ -755,6 +876,12 @@ configure_kiosk() {
         kept=$(sed -n 's/^AUDIO_OUT=//p' "$ETC_DIR/kiosk.env")
         [[ -n $kept ]] && AUDIO_OUT=$kept
     fi
+    # A rerun keeps the network fallback as it was unless --net-fallback is given.
+    case "$NET_FALLBACK" in
+        on) NET_FALLBACK=1 ;;
+        off) NET_FALLBACK=0 ;;
+        *) NET_FALLBACK=$(sed -n 's/^NET_FALLBACK=\([01]\)$/\1/p' "$ETC_DIR/kiosk.env" 2>/dev/null); NET_FALLBACK=${NET_FALLBACK:-0} ;;
+    esac
     # A rerun keeps the boot mode in use (kidnyce-karaoke mode) unless --boot is given.
     if ((!BOOT_SET)); then
         if grep -q '^BOOT_MODE=desktop' "$ETC_DIR/kiosk.env" 2>/dev/null ||
@@ -780,8 +907,21 @@ AUDIO_OUT=$AUDIO_OUT
 # karaoke: boot straight to the screens. desktop: keep the desktop and open the
 # screens from the Karaoke Screens icon. Switch with: sudo kidnyce-karaoke mode
 BOOT_MODE=$BOOT_MODE
+# Preview, karaoke mode: show the desktop when there is no network address after
+# NET_WAIT_SECONDS at boot. Change with: sudo kidnyce-karaoke net-fallback on|off
+NET_FALLBACK=$NET_FALLBACK
+NET_WAIT_SECONDS=$NET_WAIT_SECONDS
 EOF
     install_launchers
+    run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-netfallback" /usr/local/sbin/kidnyce-karaoke-netfallback
+    run install -m 644 "$SCRIPT_DIR/files/kidnyce-karaoke-netfallback.service" /etc/systemd/system/
+    systemctl_do daemon-reload
+    if ((NET_FALLBACK)); then
+        systemctl_do enable kidnyce-karaoke-netfallback.service
+        ok "no network at boot: the desktop shows after ${NET_WAIT_SECONDS}s, the screens follow once connected"
+    else
+        systemctl_do disable kidnyce-karaoke-netfallback.service
+    fi
 
     local dropin=/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
     if [[ $BOOT_MODE == karaoke ]]; then
@@ -886,6 +1026,7 @@ start_services() {
     systemctl enable --now nginx.service >/dev/null
     systemctl reload-or-restart nginx.service
     ((DDNS)) && systemctl start kidnyce-karaoke-ddns.timer
+    [[ -n $TUNNEL_HOSTNAME ]] && systemctl restart kidnyce-karaoke-tunnel.service
     systemctl start kidnyce-karaoke-ytdlp.timer
 
     local i
@@ -942,6 +1083,9 @@ summary() {
         printf '\n%s==== Kid Nyce Karaoke is installed ====%s\n' "$C_BOLD" "$C_OFF"
     fi
     echo "  Guests:        https://$DOMAIN  (scan the QR code on the crowd screen)"
+    if [[ -n $TUNNEL_HOSTNAME ]]; then
+        echo "  Internet:      https://$TUNNEL_HOSTNAME  (guests on cellular; Settings, Join code puts it in the QR code)"
+    fi
     [[ -n $code ]] && echo "  Join code:     $code  ($url)"
     echo "  Certificate:   ${CERT_KIND:-unknown}"
     echo "  Songs folder:  $DATA_DIR/songs"
@@ -988,6 +1132,7 @@ main() {
     configure_app
     configure_nginx
     configure_ddns
+    configure_tunnel
     configure_firewall
     configure_kiosk
     configure_timers
