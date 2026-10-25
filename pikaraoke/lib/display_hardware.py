@@ -285,3 +285,24 @@ def parse_outputs(raw: str | None) -> list[str]:
     """The kiosk's comma separated list, keeping only names X could have made."""
     names = [n.strip() for n in (raw or "").split(",")]
     return [n for n in names if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,31}", n)][:8]
+
+
+def lan_ip() -> str | None:
+    """This machine's address on the network it would use to go out, or None.
+
+    Connecting a UDP socket only picks a route; nothing is sent. A link local
+    address (169.254.x.x) means DHCP never answered, so it counts as none.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("1.1.1.1", 53))
+            address = s.getsockname()[0]
+    except OSError:
+        return None
+    ip = ipaddress.ip_address(address)
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+        return None
+    return address

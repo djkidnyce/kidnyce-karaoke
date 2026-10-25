@@ -74,6 +74,10 @@ class PreferenceManager:
         "audio_level": -1,
         # Desktop mode: open the screens when the desktop logs in
         "desktop_screens_on_login": False,
+        # QR code and join link use the internet address (--public-url), not the venue one
+        "join_via_internet": False,
+        # Small host address in a corner of the screens
+        "show_host_address": True,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:

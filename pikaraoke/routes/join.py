@@ -110,7 +110,7 @@ def healthz():
 def get_join_code():
     """The current code and the address the QR code carries. Host only."""
     k = get_karaoke_instance()
-    return jsonify({"code": k.join_codes.code, "join_url": k.join_codes.join_url(k.url)})
+    return jsonify({"code": k.join_codes.code, "join_url": k.join_codes.join_url(k.guest_url())})
 
 
 @join_bp.route("/api/join_code/rotate", methods=["POST"])
@@ -118,4 +118,4 @@ def rotate_join_code():
     """Issue a new code now. Every phone has to scan again. Host only."""
     k = get_karaoke_instance()
     code = k.join_codes.rotate()
-    return jsonify({"code": code, "join_url": k.join_codes.join_url(k.url)})
+    return jsonify({"code": code, "join_url": k.join_codes.join_url(k.guest_url())})

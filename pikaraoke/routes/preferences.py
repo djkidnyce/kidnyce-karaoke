@@ -30,6 +30,9 @@ def change_preferences(form):
     success, message = k.preferences.set(preference, val)
     if success:
         broadcast_event("preferences_update", {"key": preference, "value": val})
+        if preference == "join_via_internet":
+            # The QR code carries the address, so it changes with it.
+            k.generate_qr_code()
         if preference in _SCORE_PHRASE_KEYS:
             broadcast_event("score_phrases_update", _get_active_score_phrases(k))
     return jsonify([success, message])

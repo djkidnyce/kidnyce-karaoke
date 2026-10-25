@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Preview: when the Pi boots to the karaoke screens but has no network address
+# (no Ethernet, no known WiFi in range, or no answer from the router), show the
+# Raspberry Pi desktop instead so the host can pick a WiFi network with the
+# mouse. Once the Pi has an address, close the desktop and start the screens.
+#
+# Runs once at boot from kidnyce-karaoke-netfallback.service, only while
+# NET_FALLBACK=1 in kiosk.env (sudo kidnyce-karaoke net-fallback on|off).
+# Desktop mode needs none of this: the desktop is already there.
+set -uo pipefail
+
+CONFIG=${KIDNYCE_KIOSK_CONFIG:-/etc/kidnyce-karaoke/kiosk.env}
+# shellcheck source=/dev/null
+[[ -f $CONFIG ]] && source "$CONFIG"
+NET_FALLBACK=${NET_FALLBACK:-0}
+NET_WAIT_SECONDS=${NET_WAIT_SECONDS:-45}
+DROPIN=${KIOSK_DROPIN:-/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf}
+CHECK_SECONDS=${CHECK_SECONDS:-5}
+# Seconds to leave the desktop up after connecting, so the host sees it worked.
+GRACE_SECONDS=${GRACE_SECONDS:-10}
+
+log() { printf '%s\n' "kidnyce-netfallback: $*" >&2; }
+
+# A real address from a router: global scope, not 169.254.x.x (no DHCP
+# answer), plus a default route.
+has_address() {
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | grep -qv '^169\.254\.' &&
+        [[ -n $(ip -4 route show default 2>/dev/null) ]]
+}
+
+display_manager() {
+    local unit
+    for unit in lightdm gdm3 gdm sddm greetd; do
+        if systemctl cat "$unit.service" >/dev/null 2>&1; then
+            echo "$unit"
+            return 0
+        fi
+    done
+    return 1
+}
+
+wait_for_address() {
+    local seconds=$1 waited=0
+    while ((waited < seconds)); do
+        has_address && return 0
+        sleep "$CHECK_SECONDS"
+        waited=$((waited + CHECK_SECONDS))
+    done
+    has_address
+}
+
+main() {
+    [[ $NET_FALLBACK == 1 ]] || { log "off (sudo kidnyce-karaoke net-fallback on)"; return 0; }
+    # Karaoke mode only: the tty1 autologin starts the screens.
+    [[ -f $DROPIN ]] || { log "desktop mode, nothing to do"; return 0; }
+    if wait_for_address "$NET_WAIT_SECONDS"; then
+        log "network address found, the screens start as usual"
+        return 0
+    fi
+    local dm
+    if ! dm=$(display_manager); then
+        log "no network after ${NET_WAIT_SECONDS}s and no desktop installed (Lite); use: sudo kidnyce-karaoke wifi"
+        return 0
+    fi
+    log "no network after ${NET_WAIT_SECONDS}s: showing the desktop so a WiFi network can be picked"
+    systemctl stop getty@tty1.service
+    systemctl start "$dm.service"
+
+    # Two good checks in a row, so a flapping link does not bounce the screens.
+    local good=0
+    while ((good < 2)); do
+        sleep "$CHECK_SECONDS"
+        if has_address; then good=$((good + 1)); else good=0; fi
+    done
+    log "network address found: starting the karaoke screens in ${GRACE_SECONDS}s"
+    sleep "$GRACE_SECONDS"
+    systemctl stop "$dm.service"
+    systemctl restart getty@tty1.service
+    chvt 1 2>/dev/null || true
+}
+
+main "$@"

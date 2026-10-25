@@ -15,6 +15,8 @@ Environment=HOME=@@DATA_DIR@@
 Environment=PATH=@@PREFIX@@/bin:@@PREFIX@@/venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-@@ETC_DIR@@/app.env
+# Written only while the Cloudflare Tunnel is on: PIKARAOKE_PUBLIC_ARGS=--public-url ...
+EnvironmentFile=-@@ETC_DIR@@/public.env
 ExecStart=@@PREFIX@@/venv/bin/pikaraoke \
     --headless \
     --bind-address 127.0.0.1 \
@@ -25,6 +27,7 @@ ExecStart=@@PREFIX@@/venv/bin/pikaraoke \
     --intermission-music-path @@DATA_DIR@@/music \
     --bg-music-path @@DATA_DIR@@/music \
     --skip-youtubedl-upgrade \
+    $PIKARAOKE_PUBLIC_ARGS \
     $PIKARAOKE_EXTRA_ARGS
 Restart=on-failure
 RestartSec=3

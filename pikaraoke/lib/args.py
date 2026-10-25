@@ -125,6 +125,13 @@ def parse_pikaraoke_args() -> argparse.Namespace:
         required=False,
     )
     server.add_argument(
+        "--public-url",
+        help="Guest address reachable from the internet, such as a Cloudflare Tunnel hostname. "
+        "The QR code uses it when Settings, Join code says so. Host controls never answer on it.",
+        default=None,
+        required=False,
+    )
+    server.add_argument(
         "--base-path",
         help="URL path prefix for reverse proxy deployments (e.g., /karaoke). Requires a reverse proxy to handle the path routing; PiKaraoke only generates correct URLs with this prefix.",
         default="",

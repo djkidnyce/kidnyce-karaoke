@@ -1,0 +1,47 @@
+# Cloudflare Tunnel for internet guests. Written by deploy/install-pi.sh when
+# the tunnel is on; edits are overwritten.
+#
+# cloudflared dials out to Cloudflare on port 7844 (QUIC over UDP, or HTTP/2
+# over TCP when UDP is blocked). Nothing listens for the network. It forwards
+# only the tunnel's one name to a loopback only Nginx server.
+[Unit]
+Description=Kid Nyce Karaoke Cloudflare Tunnel
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A throwaway user: the tunnel token is its only secret, handed over by systemd.
+DynamicUser=yes
+LoadCredential=tunnel-token:@@ETC_DIR@@/tunnel.token
+# Optional: TUNNEL_TRANSPORT_PROTOCOL=http2 for venues that block UDP.
+EnvironmentFile=-@@ETC_DIR@@/tunnel-run.env
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --token-file %d/tunnel-token
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

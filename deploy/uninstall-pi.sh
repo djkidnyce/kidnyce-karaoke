@@ -32,7 +32,8 @@ systemctl daemon-reload
 nft delete table inet kidnyce_fw 2>/dev/null || true
 
 rm -f /etc/nginx/sites-enabled/kidnyce-karaoke.conf /etc/nginx/sites-available/kidnyce-karaoke.conf \
-    /etc/nginx/snippets/kidnyce-proxy.conf
+    /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf /etc/nginx/sites-available/kidnyce-karaoke.tunnel.conf \
+    /etc/nginx/snippets/kidnyce-proxy.conf /etc/nginx/snippets/kidnyce-common.conf
 if [[ ! -e /etc/nginx/sites-enabled/default && -f /etc/nginx/sites-available/default ]]; then
     ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 fi
@@ -57,7 +58,7 @@ if ((PURGE)); then
     userdel --remove "$KIOSK_USER" 2>/dev/null || true
     echo "Removed everything, including songs and settings."
 else
-    rm -f "$ETC_DIR/cloudflare.token"
+    rm -f "$ETC_DIR/cloudflare.token" "$ETC_DIR/tunnel.token" "$ETC_DIR/tunnel.env" "$ETC_DIR/public.env"
     echo "Removed. Kept $DATA_DIR (songs, music, settings) and $ETC_DIR."
     echo "Use --purge to delete those, the certificate and the users too."
 fi

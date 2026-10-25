@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Sets up, checks and removes the Cloudflare Tunnel that lets guests on
+# cellular data reach the Pi at an internet name such as
+# karaoke-test.kidnyce.com.
+#
+#   kidnyce-karaoke-tunnel setup    create or reuse the tunnel, route the name to
+#                                   it, save the token for cloudflared
+#   kidnyce-karaoke-tunnel status   what Cloudflare reports for the tunnel
+#   kidnyce-karaoke-tunnel remove   delete the name and the tunnel
+#
+# The tunnel is an outbound connection from cloudflared on this Pi, so no port
+# is opened on the venue router or the Pi's firewall. It only serves the one
+# name, and it feeds a loopback only Nginx server whose requests the app
+# treats as guests: host login and Settings refuse them.
+#
+# The API token needs Account, Cloudflare Tunnel, Edit and Zone, DNS, Edit.
+# It goes to curl on stdin, never on a command line.
+set -euo pipefail
+
+CONFIG=${KIDNYCE_TUNNEL_CONFIG:-/etc/kidnyce-karaoke/tunnel.env}
+# shellcheck source=/dev/null
+source "$CONFIG"
+
+: "${HOSTNAME_PUBLIC:?HOSTNAME_PUBLIC missing in $CONFIG}"
+: "${ZONE:?ZONE missing in $CONFIG}"
+: "${TOKEN_FILE:?TOKEN_FILE missing in $CONFIG}"
+: "${ORIGIN:?ORIGIN missing in $CONFIG}"
+: "${TUNNEL_TOKEN_FILE:?TUNNEL_TOKEN_FILE missing in $CONFIG}"
+API=${CF_API_BASE:-https://api.cloudflare.com/client/v4}
+TUNNEL_NAME=${TUNNEL_NAME:-kidnyce-karaoke-$(hostname -s)}
+COMMENT="Kid Nyce Karaoke tunnel for internet guests"
+
+log() { printf '%s\n' "kidnyce-tunnel: $*" >&2; }
+die() { log "$*"; exit 1; }
+
+cf() {
+    local method=$1 url=$2 body=${3:-}
+    local token
+    local -a extra=()
+    token=$(<"$TOKEN_FILE")
+    if [[ -n "$body" ]]; then
+        extra=(--header "Content-Type: application/json" --data-binary "$body")
+    fi
+    printf 'header = "Authorization: Bearer %s"\n' "$token" |
+        curl --silent --show-error --fail-with-body --max-time 30 \
+            --request "$method" --config - "${extra[@]}" "$url"
+}
+
+# Fails with Cloudflare's own error text when a call is refused.
+ok_or_die() {
+    local what=$1 response=$2
+    [[ "$(jq -r '.success' <<<"$response" 2>/dev/null)" == "true" ]] ||
+        die "$what refused: $(jq -c '.errors // .' <<<"$response" 2>/dev/null || echo "$response")"
+}
+
+# Sets ZONE_ID and ACCOUNT_ID.
+find_zone() {
+    local zones
+    zones=$(cf GET "$API/zones?name=$ZONE") || die "zone lookup failed (is the token valid?)"
+    ok_or_die "zone lookup" "$zones"
+    ZONE_ID=${ZONE_ID:-$(jq -r '.result[0].id // empty' <<<"$zones")}
+    ACCOUNT_ID=$(jq -r '.result[0].account.id // empty' <<<"$zones")
+    [[ -n $ZONE_ID && -n $ACCOUNT_ID ]] || die "zone $ZONE not visible to this token"
+}
+
+# The id of our tunnel, or nothing.
+find_tunnel() {
+    local list
+    list=$(cf GET "$API/accounts/$ACCOUNT_ID/cfd_tunnel?name=$TUNNEL_NAME&is_deleted=false") ||
+        die "listing tunnels failed: the token needs Account, Cloudflare Tunnel, Edit"
+    ok_or_die "listing tunnels" "$list"
+    jq -r '.result[0].id // empty' <<<"$list"
+}
+
+# Every record for the name, as JSON.
+records_for() {
+    local list
+    list=$(cf GET "$API/zones/$ZONE_ID/dns_records?name=$HOSTNAME_PUBLIC")
+    ok_or_die "DNS lookup" "$list"
+    jq -c '.result' <<<"$list"
+}
+
+cmd_setup() {
+    find_zone
+    local id response body records cname_id target other
+    id=$(find_tunnel)
+    if [[ -z $id ]]; then
+        body=$(jq -cn --arg n "$TUNNEL_NAME" '{name: $n, config_src: "cloudflare"}')
+        response=$(cf POST "$API/accounts/$ACCOUNT_ID/cfd_tunnel" "$body") ||
+            die "creating the tunnel failed: the token needs Account, Cloudflare Tunnel, Edit"
+        ok_or_die "creating the tunnel" "$response"
+        id=$(jq -r '.result.id' <<<"$response")
+        log "created tunnel $TUNNEL_NAME ($id)"
+    else
+        log "reusing tunnel $TUNNEL_NAME ($id)"
+    fi
+
+    # Only this name goes to the Pi; anything else gets a 404 at Cloudflare.
+    body=$(jq -cn --arg h "$HOSTNAME_PUBLIC" --arg o "$ORIGIN" \
+        '{config: {ingress: [{hostname: $h, service: $o, originRequest: {}}, {service: "http_status:404"}]}}')
+    response=$(cf PUT "$API/accounts/$ACCOUNT_ID/cfd_tunnel/$id/configurations" "$body")
+    ok_or_die "routing $HOSTNAME_PUBLIC" "$response"
+
+    # Never replace a record someone else made for this name.
+    target="$id.cfargotunnel.com"
+    records=$(records_for)
+    other=$(jq -r '[.[] | select(.type != "CNAME")] | length' <<<"$records")
+    ((other == 0)) || die "$HOSTNAME_PUBLIC already has other DNS records. Pick another name with --tunnel, or delete them first."
+    cname_id=$(jq -r '[.[] | select(.type == "CNAME")][0].id // empty' <<<"$records")
+    body=$(jq -cn --arg n "$HOSTNAME_PUBLIC" --arg c "$target" --arg m "$COMMENT" \
+        '{type: "CNAME", name: $n, content: $c, proxied: true, ttl: 1, comment: $m}')
+    if [[ -n $cname_id ]]; then
+        response=$(cf PUT "$API/zones/$ZONE_ID/dns_records/$cname_id" "$body")
+    else
+        response=$(cf POST "$API/zones/$ZONE_ID/dns_records" "$body")
+    fi
+    ok_or_die "DNS record for $HOSTNAME_PUBLIC" "$response"
+
+    response=$(cf GET "$API/accounts/$ACCOUNT_ID/cfd_tunnel/$id/token")
+    ok_or_die "fetching the tunnel token" "$response"
+    (
+        umask 077
+        jq -r '.result' <<<"$response" >"$TUNNEL_TOKEN_FILE.new"
+    )
+    [[ -s $TUNNEL_TOKEN_FILE.new ]] || die "Cloudflare returned an empty tunnel token"
+    mv -f "$TUNNEL_TOKEN_FILE.new" "$TUNNEL_TOKEN_FILE"
+    log "$HOSTNAME_PUBLIC now reaches this Pi through tunnel $id"
+}
+
+cmd_status() {
+    find_zone
+    local id response
+    id=$(find_tunnel)
+    [[ -n $id ]] || { echo "No tunnel named $TUNNEL_NAME."; return 1; }
+    response=$(cf GET "$API/accounts/$ACCOUNT_ID/cfd_tunnel/$id")
+    ok_or_die "tunnel status" "$response"
+    jq -r --arg h "$HOSTNAME_PUBLIC" '"Tunnel \(.result.name): \(.result.status), \(.result.connections | length) connection(s), serving https://\($h)"' <<<"$response"
+}
+
+cmd_remove() {
+    find_zone
+    local id records cname_id response
+    id=$(find_tunnel)
+    records=$(records_for)
+    # Only our own record: a CNAME that points at this tunnel.
+    if [[ -n $id ]]; then
+        cname_id=$(jq -r --arg t "$id.cfargotunnel.com" '[.[] | select(.type == "CNAME" and .content == $t)][0].id // empty' <<<"$records")
+        if [[ -n $cname_id ]]; then
+            response=$(cf DELETE "$API/zones/$ZONE_ID/dns_records/$cname_id")
+            ok_or_die "deleting the DNS record" "$response"
+            log "deleted the DNS record for $HOSTNAME_PUBLIC"
+        fi
+        response=$(cf DELETE "$API/accounts/$ACCOUNT_ID/cfd_tunnel/$id")
+        ok_or_die "deleting the tunnel (stop cloudflared first)" "$response"
+        log "deleted tunnel $TUNNEL_NAME"
+    fi
+    rm -f "$TUNNEL_TOKEN_FILE"
+}
+
+case "${1:-}" in
+    setup) cmd_setup ;;
+    status) cmd_status ;;
+    remove) cmd_remove ;;
+    *) echo "usage: kidnyce-karaoke-tunnel setup|status|remove" >&2; exit 2 ;;
+esac

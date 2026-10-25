@@ -95,7 +95,7 @@ def splash():
         "splash.html",
         site_title=site_name,
         blank_page=True,
-        url=k.url,
+        url=k.guest_url(),
         hostap_info=text,
         hide_url=k.hide_url,
         hide_qr_code=k.hide_qr_code,

@@ -308,6 +308,8 @@ def test_preference_manager_defaults_exist():
         "audio_output",
         "audio_level",
         "desktop_screens_on_login",
+        "join_via_internet",
+        "show_host_address",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

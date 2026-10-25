@@ -17,6 +17,11 @@ def is_admin() -> bool:
     With no admin password set everyone is an admin -- the right default for a box
     on a home TV. Otherwise it takes a signed session established by /auth.
     """
+    from pikaraoke.lib.guest_gate import is_public_request
+
+    # Host controls stay on the venue network: never an admin from the internet.
+    if is_public_request():
+        return False
     auth = get_admin_auth()
     return not auth.is_password_set() or session.get("admin") == auth.session_token
 

@@ -13,6 +13,7 @@ from pikaraoke.lib.current_app import get_karaoke_instance, get_site_name
 from pikaraoke.lib.display_hardware import (
     Layout,
     Port,
+    lan_ip,
     list_ports,
     list_sound_cards,
     parse_outputs,
@@ -43,7 +44,7 @@ def crowd():
         "crowd.html",
         site_title=get_site_name(),
         blank_page=True,
-        url=k.url,
+        url=k.guest_url(),
     )
 
 
@@ -60,9 +61,15 @@ def state():
             "join": {
                 "required": gate_enabled(),
                 "code": k.join_codes.code,
-                "join_url": k.join_codes.join_url(k.url),
-                "url": k.url,
+                "join_url": k.join_codes.join_url(k.guest_url()),
+                "url": k.guest_url(),
                 "qr_version": k.qr_version,
+            },
+            # Small print on the screens, for the host on the venue network.
+            "host": {
+                "show": k.preferences.get_or_default("show_host_address") is True,
+                "ip": lan_ip(),
+                "url": k.url,
             },
             "queue": queue[:QUEUE_PREVIEW],
             "queue_length": len(queue),
