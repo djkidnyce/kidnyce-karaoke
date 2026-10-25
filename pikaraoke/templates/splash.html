@@ -32,6 +32,7 @@
 </script>
 <script src="{{ url_for('static', filename='js/intermission.js') }}"></script>
 <script src="{{ url_for('static', filename='js/splash.js') }}"></script>
+<script src="{{ url_for('static', filename='js/end-countdown.js') }}" data-seconds="{{ end_countdown_seconds }}"></script>
 {# MSG: Small print on the screens when the Pi has no network address. #}
 <script src="{{ url_for('static', filename='js/host-address.js') }}" data-no-network="{{ _('No network') }}"></script>
 {% endblock %} {% block body %}

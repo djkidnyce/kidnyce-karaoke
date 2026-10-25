@@ -182,6 +182,18 @@ with sync_playwright() as p:
             20,
         ),
     )
+    # This Chromium cannot decode the test video, so check the countdown is wired
+    # to the player rather than watching it count.
+    check(
+        "singer screen has the end of song countdown, hidden for now",
+        singer.evaluate(
+            "(() => { const e = document.getElementById('kn-end-countdown'); return !!e && e.hidden; })()"
+        ),
+    )
+    check(
+        "the room screen has no countdown",
+        crowd.evaluate("document.getElementById('kn-end-countdown') === null"),
+    )
     crowd.screenshot(path=str(OUT_DIR / "crowd-singing.png"))
     singer.screenshot(path=str(OUT_DIR / "singer-singing.png"))
 

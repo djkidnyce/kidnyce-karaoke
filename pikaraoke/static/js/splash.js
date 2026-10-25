@@ -417,6 +417,9 @@ const handleNowPlayingUpdate = (np) => {
     }
 
     const duration = $("#duration");
+    // The song's real length, for the countdown in its last seconds
+    // (end-countdown.js). A live transcode's video.duration still grows.
+    window.kidnyceSongDuration = np.now_playing_duration || null;
     if (np.now_playing_duration) {
       duration.text(`/${formatTime(np.now_playing_duration)}`);
       duration.show();

@@ -679,3 +679,26 @@ td {
   border-top: 2px dashed var(--kn-gold);
   padding: 4px;
 }
+
+/* Kid Nyce: the singer's countdown for a song's last seconds (end-countdown.js). */
+#kn-end-countdown {
+  position: fixed;
+  top: 3vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  min-width: 9vw;
+  padding: 0.6vh 2vw;
+  border-radius: 999px;
+  background: var(--kn-night);
+  color: var(--kn-gold);
+  border: 0.3vw solid var(--kn-gold);
+  opacity: 0.85;
+  font-size: 6vw;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+#kn-end-countdown.is-final { color: var(--kn-ink); background: var(--kn-glow-break); }

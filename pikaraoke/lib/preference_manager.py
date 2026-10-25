@@ -84,6 +84,8 @@ class PreferenceManager:
         "changeover_seconds": 30,
         # Show guests the time left and which songs may not fit
         "show_time_left_to_guests": False,
+        # Big countdown on the singer's screen for a song's last seconds; 0 is off
+        "end_countdown_seconds": 20,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:
