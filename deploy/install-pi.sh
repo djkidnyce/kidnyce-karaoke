@@ -9,7 +9,7 @@
 #   2. A locked down service user and folders
 #   3. Deno (pinned, checksum verified) so yt-dlp can download from YouTube
 #   4. The app in a virtualenv from a hash pinned lock file
-#   5. A Let's Encrypt certificate for karaoke.djkidnyce.com by DNS challenge
+#   5. A Let's Encrypt certificate for karaoke.kidnyce.com by DNS challenge
 #      (no ports opened to the internet)
 #   6. Nginx in front with TLS, security headers and rate limits
 #   7. A Cloudflare DNS record kept pointed at this Pi's LAN address
@@ -27,7 +27,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.2.0"
-APP_VERSION="1.23.0+kidnyce.6"
+APP_VERSION="1.23.0+kidnyce.7"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -38,7 +38,7 @@ declare -A DENO_SHA256=(
 )
 
 # ---------------------------------------------------------------- defaults
-DOMAIN="karaoke.djkidnyce.com"
+DOMAIN="karaoke.kidnyce.com"
 ZONE=""
 EMAIL=""
 DNS_PROVIDER="cloudflare"

@@ -9,8 +9,10 @@ from pikaraoke.lib.display_hardware import (
     REPORT_STALE_SECONDS,
     Board,
     KioskReport,
+    SoundCard,
     detect_board,
     list_ports,
+    list_sound_cards,
     monitor_name,
     parse_outputs,
     plan_layout,
@@ -309,3 +311,55 @@ def test_hardware_trusts_what_x_reports(karaoke):
         ("DUMMY0", True),
     ]
     assert body["layout"]["signature"] == "singer=HDMI-1 crowd=HDMI-2"
+
+
+# Sound
+
+PI_CARDS = """ 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0
+                      vc4-hdmi-0
+ 1 [vc4hdmi1       ]: vc4-hdmi - vc4-hdmi-1
+                      vc4-hdmi-1
+ 2 [Headphones     ]: bcm2835_headpho - bcm2835 Headphones
+                      bcm2835 Headphones
+ 3 [Device         ]: USB-Audio - USB PnP Audio Device
+                      Generic USB PnP Audio Device at usb-0000:01:00.0-1.3, full speed
+"""
+
+
+def test_lists_the_pi_sound_cards(tmp_path):
+    (tmp_path / "proc/asound").mkdir(parents=True)
+    (tmp_path / "proc/asound/cards").write_text(PI_CARDS)
+    cards = list_sound_cards(str(tmp_path))
+    assert [(c.id, c.usb) for c in cards] == [
+        ("vc4hdmi0", False),
+        ("vc4hdmi1", False),
+        ("Headphones", False),
+        ("Device", True),
+    ]
+    assert cards[3].name == "USB PnP Audio Device"
+
+
+def test_no_sound_cards_without_alsa(tmp_path):
+    assert list_sound_cards(str(tmp_path)) == []
+
+
+def test_the_kiosk_gets_the_sound_choice(karaoke):
+    karaoke.preferences.set("audio_output", "headphones")
+    karaoke.preferences.set("audio_level", 72)
+    body = build(karaoke).get("/api/display/layout?connected=HDMI-1").get_json()
+    assert body["audio"] == {"output": "headphones", "level": 72}
+
+
+def test_by_default_the_kiosk_keeps_the_installer_sound(karaoke):
+    body = build(karaoke).get("/api/display/layout?connected=HDMI-1").get_json()
+    assert body["audio"] == {"output": "", "level": -1}
+
+
+def test_hardware_lists_sound_cards_for_settings(karaoke, monkeypatch):
+    monkeypatch.setattr(
+        "pikaraoke.routes.display.list_sound_cards",
+        lambda: [SoundCard("Device", "USB PnP Audio Device", True)],
+    )
+    body = build(karaoke).get("/api/display/hardware").get_json()
+    assert body["sound_cards"] == [{"id": "Device", "name": "USB PnP Audio Device", "usb": True}]
+    assert body["audio"] == {"output": "", "level": -1}

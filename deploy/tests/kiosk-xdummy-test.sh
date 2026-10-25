@@ -90,7 +90,8 @@ stop_all() {
 }
 
 host_defaults() {
-    "$CLI" screens auto >/dev/null && "$CLI" screens swap off >/dev/null && "$CLI" screens port auto >/dev/null
+    "$CLI" screens auto >/dev/null && "$CLI" screens swap off >/dev/null && "$CLI" screens port auto >/dev/null &&
+        "$CLI" audio reset >/dev/null && "$CLI" audio volume keep >/dev/null
 }
 trap 'stop_all; host_defaults' EXIT
 
@@ -190,6 +191,16 @@ check "the app agrees the singer is on DUMMY1" grep -F 'DUMMY1 [DUMMY1]: TV, sho
 before=$(grep -c started "$WORK/kiosk.log")
 sleep 8
 check "no relaunch while nothing changes" test "$(grep -c started "$WORK/kiosk.log")" -eq "$before"
+
+echo "== Host picks the headphone jack and a volume"
+"$CLI" audio headphones >/dev/null
+check "a new sound output relaunches the screens" wait_log "started crowd screen" 4
+check "the singer browser plays to the headphone jack" pgrep -f 'kidnyce-kiosk/singer.*--alsa-output-device=plughw:CARD=Headphones,DEV=0'
+before=$(grep -c started "$WORK/kiosk.log")
+"$CLI" audio volume 60 >/dev/null
+# No Headphones card here, so the session logs that it tried, without a relaunch.
+check "the volume reaches the session" wait_log "Headphones"
+check "a volume change does not relaunch" test "$(grep -c started "$WORK/kiosk.log")" -eq "$before"
 stop_all
 host_defaults
 

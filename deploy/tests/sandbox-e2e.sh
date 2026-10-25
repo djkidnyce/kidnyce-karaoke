@@ -13,7 +13,7 @@ set -Eeuo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PEBBLE_SRC=${PEBBLE_SRC:?set PEBBLE_SRC to the pebble source tree}
-DOMAIN=karaoke.djkidnyce.com
+DOMAIN=karaoke.kidnyce.com
 WORK=$(mktemp -d)
 PASS=0
 FAIL=0
@@ -251,6 +251,12 @@ check "kidnyce-karaoke screens single switches" bash -c "kidnyce-karaoke screens
 check "kidnyce-karaoke screens swap on" bash -c "kidnyce-karaoke screens swap on | grep -q 'swap: on'"
 kidnyce-karaoke screens auto >/dev/null
 kidnyce-karaoke screens swap off >/dev/null
+check "kidnyce-karaoke audio usb sets the app setting" bash -c "kidnyce-karaoke audio usb >/dev/null && kidnyce-karaoke audio | grep -qx 'Sound out: usb'"
+check "kidnyce-karaoke audio volume 75" bash -c "kidnyce-karaoke audio volume 75 >/dev/null && kidnyce-karaoke audio | grep -qx 'Device volume: 75%'"
+check "kidnyce-karaoke audio refuses a bare word" bash -c "! kidnyce-karaoke audio card 2>/dev/null"
+check "kidnyce-karaoke audio volume refuses 101" bash -c "! kidnyce-karaoke audio volume 101 2>/dev/null"
+check "the screens get the sound choice" bash -c "curl -fs 'http://127.0.0.1:$PORT/api/display/layout?connected=HDMI-1' | jq -e '.audio == {output: \"usb\", level: 75}' >/dev/null"
+check "kidnyce-karaoke audio reset" bash -c "kidnyce-karaoke audio reset >/dev/null && kidnyce-karaoke audio volume keep >/dev/null && kidnyce-karaoke audio | grep -q '^Sound out: install default'"
 
 check "nftables table loads and unloads" bash -c "nft -f /etc/kidnyce-karaoke/firewall.nft && nft list table inet kidnyce_fw >/dev/null && nft delete table inet kidnyce_fw"
 

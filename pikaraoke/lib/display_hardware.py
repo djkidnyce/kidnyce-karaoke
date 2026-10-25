@@ -254,6 +254,33 @@ class KioskReport:
             return list(self._outputs)
 
 
+@dataclass(frozen=True)
+class SoundCard:
+    id: str  # ALSA's name for it, as in plughw:CARD=<id>,DEV=0
+    name: str
+    usb: bool
+
+
+_CARD_LINE = re.compile(r"^\s*\d+ \[(?P<id>[^\]\s]+)\s*\]: (?P<driver>\S+) - (?P<name>.+)$")
+
+
+def list_sound_cards(root: str = "/") -> list[SoundCard]:
+    """The sound cards ALSA sees. /proc stays readable inside the app's sandbox."""
+    text = _read_text(os.path.join(root, "proc/asound/cards")) or ""
+    cards = []
+    for line in text.splitlines():
+        match = _CARD_LINE.match(line)
+        if match:
+            cards.append(
+                SoundCard(
+                    match.group("id"),
+                    match.group("name").strip(),
+                    match.group("driver") == "USB-Audio",
+                )
+            )
+    return cards
+
+
 def parse_outputs(raw: str | None) -> list[str]:
     """The kiosk's comma separated list, keeping only names X could have made."""
     names = [n.strip() for n in (raw or "").split(",")]

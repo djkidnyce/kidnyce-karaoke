@@ -68,10 +68,10 @@ hdmi_card() {
 # "hdmi:" PCM, which formats IEC958 frames; plughw on it fails.
 alsa_device() {
     local sound_output=$1 crowd_output=$2 port card
-    case "$AUDIO_OUT" in
+    case "$SOUND_OUT" in
         hdmi-singer | hdmi-crowd)
             port=$sound_output
-            [[ $AUDIO_OUT == hdmi-crowd && -n $crowd_output ]] && port=$crowd_output
+            [[ $SOUND_OUT == hdmi-crowd && -n $crowd_output ]] && port=$crowd_output
             card=$(hdmi_card "$port")
             if [[ -n $card ]]; then echo "hdmi:CARD=$card,DEV=0"; else echo "default"; fi
             ;;
@@ -83,11 +83,42 @@ alsa_device() {
                     return
                 fi
             done
-            log "AUDIO_OUT=usb but no USB audio device found, using default"
+            log "sound output usb, but no USB audio device found, using default"
             echo "default"
             ;;
+        *) echo "$SOUND_OUT" ;;
+    esac
+}
+
+# The output the host chose in Settings, Sound, if it is one this session can
+# use; otherwise AUDIO_OUT from kiosk.env, the installer's choice.
+sound_choice() {
+    case "$1" in
+        hdmi-singer | hdmi-crowd | headphones | usb | default) echo "$1" ;;
+        *:*) if [[ $1 =~ ^[A-Za-z0-9:=,_.-]+$ ]]; then echo "$1"; else echo "$AUDIO_OUT"; fi ;;
         *) echo "$AUDIO_OUT" ;;
     esac
+}
+
+# Set the hardware volume of the card behind an ALSA device, such as
+# plughw:CARD=Headphones,DEV=0, on its first playback volume control. The
+# app keeps the level, so it comes back on every start without alsactl.
+apply_level() {
+    local device=$1 level=$2 card control
+    [[ $level =~ ^[0-9]+$ ]] && ((level <= 100)) || return 0
+    card=$(sed -n 's/.*CARD=\([^,]*\).*/\1/p' <<<"$device")
+    [[ -n $card ]] || return 0
+    control=$(amixer -c "$card" scontents 2>/dev/null | awk -F"'" '
+        /^Simple mixer control/ {name = $2}
+        /Capabilities:.*pvolume/ {print name; exit}')
+    if [[ -z $control ]]; then
+        log "$card has no playback volume control; level $level% not applied"
+        return 0
+    fi
+    amixer -q -c "$card" sset "$control" "$level%" unmute 2>/dev/null ||
+        amixer -q -c "$card" sset "$control" "$level%" 2>/dev/null ||
+        { log "could not set $card $control to $level%"; return 0; }
+    log "volume: $card $control at $level%"
 }
 
 wait_for_app() {
@@ -140,7 +171,8 @@ launch() {
 fetch_layout() {
     curl --silent --fail --max-time 3 --get \
         --data-urlencode "connected=$(paste -sd, - <<<"$1")" \
-        "$APP_URL/api/display/layout" | jq -r '.screens[] | "\(.role) \(.output) \(.path)"'
+        "$APP_URL/api/display/layout" |
+        jq -r '(.screens[] | "\(.role) \(.output) \(.path)"), "sound \((.audio.output // "") | if . == "" then "-" else . end) \(.audio.level // -1)"'
 }
 
 # Until the app has answered once: everything on the first port.
@@ -183,6 +215,7 @@ apply_layout() {
 
     local device
     device=$(alsa_device "$sound" "$crowd")
+    SOUND_DEVICE=$device
     local -a audio_flags=()
     [[ $device != pulse ]] && audio_flags=(--alsa-output-device="$device")
 
@@ -219,12 +252,21 @@ main() {
     wait_for_app
     trap 'stop_all; exit 0' TERM INT
 
-    local now plan current_plan="" current_outputs="" name dead
+    local now reply plan current_plan="" current_outputs="" name dead sound_line choice level applied_level=""
+    SOUND_OUT=$AUDIO_OUT SOUND_DEVICE=""
     while true; do
         now=$(connected_outputs)
-        if ! plan=$(fetch_layout "$now"); then
+        if reply=$(fetch_layout "$now"); then
+            plan=$(grep -v '^sound ' <<<"$reply" || true)
+            sound_line=$(grep '^sound ' <<<"$reply" || true)
+            read -r _ choice level <<<"$sound_line"
+            # An output change needs the browsers relaunched, so it is part of the plan.
+            SOUND_OUT=$(sound_choice "$choice")
+            [[ -n $plan ]] && plan+=$'\n'"sound $SOUND_OUT"
+        else
             # App restarting: keep what is on screen. Never answered yet: show something.
             if [[ -n $current_plan ]]; then plan=$current_plan; else plan=$(fallback_layout "$now"); fi
+            level=$applied_level
         fi
         dead=0
         for name in "${!PIDS[@]}"; do
@@ -238,9 +280,15 @@ main() {
             current_plan="" current_outputs=$now
             if [[ -n $plan ]] && apply_layout "$plan" "$now"; then
                 current_plan=$plan
+                applied_level=""
             else
                 log "no screen to show on (outputs: $(paste -sd, - <<<"${now:-none}")), waiting"
             fi
+        fi
+        # The level changes in place: no relaunch, the song keeps playing.
+        if [[ -n $SOUND_DEVICE && ${level:-} != "$applied_level" ]]; then
+            apply_level "$SOUND_DEVICE" "${level:--1}"
+            applied_level=${level:-}
         fi
         sleep "$POLL_SECONDS"
     done

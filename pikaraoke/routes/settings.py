@@ -88,4 +88,5 @@ def settings():
         screen_mode=k.preferences.get_or_default("screen_mode"),
         swap_screens=k.preferences.get_or_default("swap_screens"),
         new_join_code_on_start=k.preferences.get_or_default("new_join_code_on_start"),
+        audio_level=k.preferences.get_or_default("audio_level"),
     )

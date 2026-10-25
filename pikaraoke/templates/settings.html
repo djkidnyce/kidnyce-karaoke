@@ -590,6 +590,92 @@
 
 			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
 				<div>
+					{# MSG: Header of the settings section for where the Pi sends its sound. #}
+					<h3 class="m-0">{% trans %}Sound{% endtrans %}</h3>
+					{# MSG: One-line summary under the Sound heading, naming the controls inside it. #}
+					<span class="section-summary is-size-7 has-text-grey-light">{% trans %}Speaker output and device volume{% endtrans %}</span>
+				</div>
+			</header>
+			<div class="collapsible-content panel is-shadowless mb-0">
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-audio-output">
+						{# MSG: Label for which jack or port plays the sound. #} {% trans %}Sound comes out of{% endtrans %}
+					</label>
+					<div class="select is-flex-shrink-0 ml-4">
+						<select id="pref-audio-output">
+							{# MSG: Sound output option: whatever was set when the Pi was installed. #}
+							<option value="">{% trans %}Install default{% endtrans %}</option>
+							{# MSG: Sound output option: the TV showing the singer screen. #}
+							<option value="hdmi-singer">{% trans %}Singer TV (HDMI){% endtrans %}</option>
+							{# MSG: Sound output option: the TV showing the room screen. #}
+							<option value="hdmi-crowd">{% trans %}Room TV (HDMI){% endtrans %}</option>
+							{# MSG: Sound output option: the Pi's 3.5 mm headphone jack. #}
+							<option value="headphones">{% trans %}Headphone jack (3.5 mm){% endtrans %}</option>
+							{# MSG: Sound output option: the first USB sound card or mixer found. #}
+							<option value="usb">{% trans %}USB sound card (first found){% endtrans %}</option>
+						</select>
+					</div>
+				</div>
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-audio-level">
+						{# MSG: Numberbox label for the hardware volume of the sound output, 0 to 100. Empty leaves it alone. #} {% trans %}Device volume (%){% endtrans %}
+					</label>
+					<input id="pref-audio-level" class="input is-flex-shrink-0 ml-4" type="number" min="0" max="100" step="5" value="{% if audio_level is number and audio_level >= 0 %}{{ audio_level }}{% endif %}" />
+				</div>
+				<div class="panel-block px-5 py-3 is-block">
+					<p id="sound-cards" class="is-size-7 mb-1"></p>
+					{# MSG: Help text under the Sound settings. #}
+					<p class="is-size-7 has-text-grey-light mb-0">{% trans %}A new output restarts the screens. The volume applies within 5 seconds and is kept after a reboot. Leave the volume empty to keep the level set on the Pi.{% endtrans %}</p>
+				</div>
+			</div>
+			<script>
+				(function () {
+					var hardwareUrl = "{{ url_for('display.hardware') }}";
+					var changeUrl = "{{ url_for('preferences.change_preferences') }}";
+					var t = {
+						// {# MSG: Sound output option for one USB sound card. {name} is the card name. #}
+						usbCard: {{ _('USB: {name}') | tojson }},
+						// {# MSG: List of sound devices the Pi found. {cards} is a comma separated list. #}
+						found: {{ _('Sound devices found: {cards}.') | tojson }},
+						// {# MSG: Shown when no sound devices could be read. #}
+						none: {{ _('No sound devices found on this machine.') | tojson }}
+					};
+					function render(h) {
+						var cards = h.sound_cards || [];
+						var $out = $("#pref-audio-output");
+						$out.find("option[data-card]").remove();
+						cards.filter(function (c) { return c.usb; }).forEach(function (c) {
+							$out.append($("<option>").attr("data-card", c.id).val("plughw:CARD=" + c.id + ",DEV=0").text(t.usbCard.replace("{name}", c.name)));
+						});
+						var current = (h.audio && h.audio.output) || "";
+						if (current && !$out.find("option").filter(function () { return this.value === current; }).length) {
+							$out.append($("<option>").attr("data-card", "custom").val(current).text(current));
+						}
+						$out.val(current);
+						$("#sound-cards").text(cards.length ? t.found.replace("{cards}", cards.map(function (c) { return c.name; }).join(", ")) : t.none);
+					}
+					function save(pref, val) {
+						return $.post(changeUrl, { pref: pref, val: val }).done(function (data) {
+							showNotification(data[1], data[0] ? "is-success" : "is-danger");
+						});
+					}
+					$("#pref-audio-output").on("change", function () { save("audio_output", $(this).val()); });
+					$("#pref-audio-level").on("change", function () {
+						var raw = $(this).val();
+						if (raw === "") { save("audio_level", -1); return; }
+						var n = Math.max(0, Math.min(100, Math.round(Number(raw))));
+						if (isNaN(n)) { return; }
+						$(this).val(n);
+						save("audio_level", n);
+					});
+					$.getJSON(hardwareUrl).done(render);
+				})();
+			</script>
+
+			<hr class="my-0">
+
+			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
+				<div>
 					{# MSG: Header of the settings section for the music and video the splash screen plays between songs. #}
 					<h3 class="m-0">{% trans %}Background music and video{% endtrans %}</h3>
 					{# MSG: One-line summary under the Background music and video heading, naming the controls inside it. #}

@@ -4,7 +4,7 @@
 
 Karaoke for Kid Nyce's gigs. A fork of [PiKaraoke](https://github.com/vicwomg/pikaraoke)
 built for a Raspberry Pi with one or two TVs, served over HTTPS at
-`karaoke.djkidnyce.com`. Guests scan a QR code, type nothing, and queue songs from their
+`karaoke.kidnyce.com`. Guests scan a QR code, type nothing, and queue songs from their
 phones.
 
 ## What this fork adds

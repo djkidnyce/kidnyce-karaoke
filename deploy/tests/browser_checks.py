@@ -295,6 +295,26 @@ with sync_playwright() as p:
             10,
         ),
     )
+
+    def audio() -> dict:
+        return admin_ctx.request.get(f"{SITE}/api/display/hardware").json()["audio"]
+
+    admin_page.click("h3:text-is('Sound')")
+    admin_page.select_option("#pref-audio-output", "headphones")
+    check(
+        "host picks the headphone jack in Settings, Sound",
+        wait_for(lambda: audio()["output"] == "headphones", 10),
+    )
+    admin_page.fill("#pref-audio-level", "70")
+    admin_page.dispatch_event("#pref-audio-level", "change")
+    check("host sets the device volume", wait_for(lambda: audio()["level"] == 70, 10))
+    admin_page.fill("#pref-audio-level", "")
+    admin_page.dispatch_event("#pref-audio-level", "change")
+    admin_page.select_option("#pref-audio-output", "")
+    check(
+        "host goes back to the install default sound",
+        wait_for(lambda: audio() == {"output": "", "level": -1}, 10),
+    )
     admin_page.screenshot(path=str(OUT_DIR / "host-settings.png"), full_page=True)
 
     check(

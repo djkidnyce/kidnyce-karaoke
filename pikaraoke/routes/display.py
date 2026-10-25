@@ -14,6 +14,7 @@ from pikaraoke.lib.display_hardware import (
     Layout,
     Port,
     list_ports,
+    list_sound_cards,
     parse_outputs,
     plan_layout,
 )
@@ -98,7 +99,15 @@ def layout():
     k = get_karaoke_instance()
     connected = parse_outputs(request.args.get("connected"))
     k.kiosk_report.update(connected)
-    return jsonify(_plan(connected).as_payload())
+    return jsonify({**_plan(connected).as_payload(), "audio": _audio(k)})
+
+
+def _audio(k) -> dict:
+    """The host's sound choice. The kiosk session checks and applies it."""
+    return {
+        "output": k.preferences.get_or_default("audio_output"),
+        "level": k.preferences.get_or_default("audio_level"),
+    }
 
 
 @display_bp.route("/api/display/hardware")
@@ -146,5 +155,7 @@ def hardware():
                 "swap_screens": prefs.get_or_default("swap_screens"),
             },
             "layout": plan.as_payload(),
+            "audio": _audio(k),
+            "sound_cards": [{"id": c.id, "name": c.name, "usb": c.usb} for c in list_sound_cards()],
         }
     )

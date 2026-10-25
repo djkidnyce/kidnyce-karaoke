@@ -305,6 +305,8 @@ def test_preference_manager_defaults_exist():
         "single_screen_output",
         "swap_screens",
         "new_join_code_on_start",
+        "audio_output",
+        "audio_level",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

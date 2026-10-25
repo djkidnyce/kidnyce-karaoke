@@ -2,7 +2,7 @@
 
 One script turns a fresh Raspberry Pi OS install into the karaoke box: the app, one
 or two HDMI screens, Nginx with a trusted Let's Encrypt certificate for
-`karaoke.djkidnyce.com`, a firewall, and a DNS record that follows the Pi from venue
+`karaoke.kidnyce.com`, a firewall, and a DNS record that follows the Pi from venue
 to venue.
 
 ## What you need
@@ -13,24 +13,24 @@ to venue.
 | Official 5V 3A USB C supply | Undervoltage throttles the CPU and drops video frames. |
 | microSD (32 GB or more, A2) or USB SSD | Songs live on it. An SSD is faster and lasts longer. |
 | One or two micro HDMI to HDMI cables | With two TVs, HDMI0 (next to USB C) is the singer screen and HDMI1 the room screen. With one TV, either port shows everything. |
-| Cloudflare account with `djkidnyce.com` | For the certificate and the DNS record. See below. |
+| Cloudflare account with `kidnyce.com` | For the certificate and the DNS record. See below. |
 | Optional: USB audio interface | Cleaner than the 3.5 mm jack for feeding your mixer. |
 
 ## 1. Cloudflare (once)
 
 The installer gets the certificate with a DNS challenge, so nothing on the Pi is
-exposed to the internet, and it keeps an `A` record for `karaoke.djkidnyce.com`
+exposed to the internet, and it keeps an `A` record for `karaoke.kidnyce.com`
 pointed at the Pi's address on whatever network it joins.
 
-1. Put `djkidnyce.com` on Cloudflare DNS if it is not there yet (Add a site, then
+1. Put `kidnyce.com` on Cloudflare DNS if it is not there yet (Add a site, then
    switch the nameservers at your registrar). Cloudflare copies the existing records,
    so the WordPress site and email keep working. Leave those records as they are.
 2. Create an API token: My Profile, API Tokens, Create Token, "Edit zone DNS"
-   template. Permissions: `Zone / DNS / Edit`. Zone resources: `Include / Specific zone / djkidnyce.com`. Give it an expiry date you will remember to renew.
+   template. Permissions: `Zone / DNS / Edit`. Zone resources: `Include / Specific zone / kidnyce.com`. Give it an expiry date you will remember to renew.
 3. Save the token in a file on the Pi, readable only by you:
    `install -m 600 /dev/null ~/cloudflare.token && nano ~/cloudflare.token`
 
-That token can edit every record in `djkidnyce.com`. Keep the file `600`, never commit
+That token can edit every record in `kidnyce.com`. Keep the file `600`, never commit
 it, and revoke it from the Cloudflare dashboard if the Pi is ever lost.
 
 If your DNS is somewhere else, see "Other DNS hosts" at the end.
@@ -111,8 +111,39 @@ sudo kidnyce-karaoke screens port HDMI-2     which port the one screen uses
 sudo kidnyce-karaoke screens swap on         singer on HDMI1, room on HDMI0
 ```
 
-Sound follows the singer screen, or the one screen. `AUDIO_OUT` in
-`/etc/kidnyce-karaoke/kiosk.env` overrides it (`headphones`, `usb`, `hdmi-crowd`).
+## Sound
+
+Settings, Sound picks where the sound goes and sets the device volume. Both are kept
+in the app, so they come back after a reboot. No `alsamixer` or `alsactl store`
+needed.
+
+| Output | Where it plays |
+| --- | --- |
+| Install default | What `--audio` set at install. Out of the box that is the singer TV. |
+| Singer TV (HDMI) | The TV showing the singer screen, or the one screen. |
+| Room TV (HDMI) | The TV showing the room screen. |
+| Headphone jack (3.5 mm) | The Pi's analog jack. Use this for a mixer or powered speakers. |
+| USB sound card | The first USB card found. Each USB card plugged in also gets its own entry. |
+
+A new output restarts the screens, which takes a few seconds. Device volume is 0 to
+100 and applies within 5 seconds without a restart. Leave it empty to keep whatever
+level the Pi already has. The player volume under Playback is separate: it scales the
+song inside the browser, the device volume sets the jack or card itself. For a mixer
+input, set the device volume around 80 and ride the gain on the mixer.
+
+The same from a terminal:
+
+```text
+sudo kidnyce-karaoke audio                   current output, volume, sound devices
+sudo kidnyce-karaoke audio headphones        3.5 mm jack
+sudo kidnyce-karaoke audio usb               first USB sound card
+sudo kidnyce-karaoke audio plughw:CARD=Device,DEV=0   one card by its ALSA name
+sudo kidnyce-karaoke audio reset             back to the install default
+sudo kidnyce-karaoke audio volume 80         device volume, kept after a reboot
+sudo kidnyce-karaoke audio volume keep       stop setting the volume
+```
+
+`aplay -l` lists the card names. `speaker-test -D plughw:CARD=Headphones,DEV=0 -c 2 -t wav -l 1` plays a test tone on one device.
 
 ## 4. Check it
 
@@ -121,12 +152,12 @@ kidnyce-karaoke doctor
 ```
 
 It checks the services, HTTPS through Nginx with a trusted certificate, days left on
-the certificate, that `karaoke.djkidnyce.com` resolves to this Pi, Deno and `yt-dlp`,
+the certificate, that `karaoke.kidnyce.com` resolves to this Pi, Deno and `yt-dlp`,
 power and temperature, which screens are up, and lists the sound devices.
 
 Then from a phone on the same WiFi: scan the QR code on the room screen (or the one
 screen). It should
-open `https://karaoke.djkidnyce.com/join/XXXXXX` with a padlock and land on the home
+open `https://karaoke.kidnyce.com/join/XXXXXX` with a padlock and land on the home
 page.
 
 ## Gig day
@@ -134,7 +165,7 @@ page.
 | When | Do |
 | --- | --- |
 | Arrive | Join the venue WiFi (or plug in Ethernet). The DNS record updates within 5 minutes. Run `kidnyce-karaoke doctor`. |
-| Start | Settings, Sessions: start a session named for the night. The join code stays the same until the session changes. If you skip this, the first song starts one and keeps the code guests already scanned. |
+| Start | Settings, Sessions: start a session named for the night. Each boot gives a new join code (Settings, Join code, or `code-on-boot off` to keep it). If you skip the session, the first song starts one and keeps the code guests already scanned. |
 | Breaks | Home page, Hosting: "Break before next singer", or turn breaks on in Settings, Intermission. |
 | Trouble guest | `sudo kidnyce-karaoke new-code`: every phone has to scan again. |
 | End | End the session. The code rotates, so last night's phones are locked out. |
@@ -143,25 +174,107 @@ Drop songs into `/var/lib/kidnyce-karaoke/songs` and break music into
 `/var/lib/kidnyce-karaoke/music` over SFTP. Your login was added to the group that owns
 both folders (log out and in once). Then Settings, "Rescan" under Intermission.
 
-## Day to day commands
+## Commands
+
+Everything below is also in `kidnyce-karaoke help`. Commands that change something
+need `sudo`. Most of them have a matching control in Settings, so the terminal is the
+backup, not the only way.
+
+### Status and checks
 
 ```text
 kidnyce-karaoke status          services, certificate, address, join code
-kidnyce-karaoke code            current join code and QR address
-sudo kidnyce-karaoke new-code   issue a new join code
-sudo kidnyce-karaoke password   show the admin password
-sudo kidnyce-karaoke set-password
-kidnyce-karaoke doctor
-sudo kidnyce-karaoke screens [auto|single|dual|port NAME|swap on|off]
-kidnyce-karaoke logs app|nginx|screens|ddns
-sudo kidnyce-karaoke restart app|screens|all
-sudo kidnyce-karaoke update-ytdlp
-sudo kidnyce-karaoke ddns
+kidnyce-karaoke doctor          checks everything and says what is wrong
+kidnyce-karaoke logs app        app log (also nginx, screens, ddns)
 ```
+
+`doctor` is the first thing to run when something looks off. It reads the certificate
+from the live HTTPS port, so it works without root.
+
+### Join code
+
+```text
+kidnyce-karaoke code                    current join code and QR address
+sudo kidnyce-karaoke new-code           new code now, every phone scans again
+sudo kidnyce-karaoke code-on-boot on    new code every time the Pi starts (default)
+sudo kidnyce-karaoke code-on-boot off   keep the code across reboots
+```
+
+In the app: Settings, Join code.
+
+### Admin password
+
+```text
+sudo kidnyce-karaoke password           show it
+sudo kidnyce-karaoke set-password       choose a new one
+```
+
+### Screens
+
+```text
+sudo kidnyce-karaoke screens                 board, ports, TVs, what each shows
+sudo kidnyce-karaoke screens auto|single|dual
+sudo kidnyce-karaoke screens port HDMI-2     port for one screen, or auto
+sudo kidnyce-karaoke screens swap on|off     swap the singer and room screens
+```
+
+In the app: Settings, Screens. See [Screens: one or two](#screens-one-or-two).
+
+### Sound
+
+```text
+sudo kidnyce-karaoke audio                   show the output, volume and devices
+sudo kidnyce-karaoke audio OUTPUT            hdmi-singer, hdmi-crowd, headphones, usb, default, or plughw:CARD=X,DEV=0
+sudo kidnyce-karaoke audio reset             back to the install default
+sudo kidnyce-karaoke audio volume 0-100      device volume, kept after a reboot
+sudo kidnyce-karaoke audio volume keep       leave the volume alone
+```
+
+In the app: Settings, Sound. See [Sound](#sound).
+
+### WiFi at a venue
+
+```text
+sudo kidnyce-karaoke wifi
+```
+
+Opens the NetworkManager menu on the console. Pick the venue network, enter its
+password, and back out. The command then prints the new LAN address and updates the
+DNS record, so phones can use the name right away. Connect a keyboard to the Pi, or
+SSH in over Ethernet.
+
+### Desktop and karaoke mode
+
+```text
+sudo kidnyce-karaoke mode desktop       Raspberry Pi OS desktop, screens off (reboots)
+sudo kidnyce-karaoke mode karaoke       back to the karaoke screens (reboots)
+```
+
+Desktop mode is for setup work that needs the full desktop, such as the desktop WiFi
+menu or Bluetooth. The app keeps running, so phones still work. It needs Raspberry Pi
+OS with desktop, not Lite. On Lite, use `wifi` above.
+
+### Services and updates
+
+```text
+sudo kidnyce-karaoke restart app|screens|all
+sudo kidnyce-karaoke update-ytdlp       pull the newest yt-dlp now (also runs every Monday)
+sudo kidnyce-karaoke ddns               update the DNS record now (also every 5 minutes)
+```
+
+### Updating the app
+
+```sh
+cd ~/kidnyce-karaoke && git pull
+sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token
+```
+
+A rerun keeps the admin password, join code, songs, settings and sound choice. Pass
+`--audio` only to change the install default.
 
 ## Venue network notes
 
-Guests must be on the same network as the Pi: `karaoke.djkidnyce.com` points at the
+Guests must be on the same network as the Pi: `karaoke.kidnyce.com` points at the
 Pi's private address. Two things can get in the way:
 
 1. **Client isolation** ("guest mode" WiFi that blocks devices from seeing each
@@ -172,7 +285,7 @@ Pi's private address. Two things can get in the way:
 The reliable fix for both is your own travel router (GL.iNet and similar): it joins
 the venue WiFi or Ethernet as its uplink, gives the Pi a fixed address, and broadcasts
 your own SSID. Put a DHCP reservation on the Pi and, in the router's DNS settings,
-add `karaoke.djkidnyce.com` pointing at it. Guests join your SSID and scan.
+add `karaoke.kidnyce.com` pointing at it. Guests join your SSID and scan.
 
 ## What the installer sets up
 
