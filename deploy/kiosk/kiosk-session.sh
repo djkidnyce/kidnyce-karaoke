@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# X session for the karaoke screens. Started by startx from the kiosk user's
-# login on tty1, so a crash drops back to getty, which logs in and starts it
-# again.
+# The karaoke screens. Two ways to run:
+#
+#   Karaoke mode (default): the X session itself, started by startx from the
+#   kiosk user's login on tty1, so a crash drops back to getty, which logs in
+#   and starts it again. It sets each TV's mode and turns unused ports off.
+#
+#   --desktop: inside a normal desktop session, from the Karaoke Screens icon.
+#   It leaves the desktop's monitor layout alone, plays sound through the
+#   desktop's PipeWire, and closing a screen (Alt+F4) closes them all.
+#   --autostart does the same at desktop login, only when Settings, Screens
+#   says to. --stop closes a desktop run.
 #
 # Every few seconds it tells the app which ports X sees connected and asks
 # which page goes on which port. The host picks the setup in Settings, Screens:
@@ -16,6 +24,16 @@
 # Plugging a TV in or out, or changing the setting, relaunches the windows.
 set -uo pipefail
 
+DESKTOP=0 AUTOSTART=0 STOP=0
+for arg in "$@"; do
+    case "$arg" in
+        --desktop) DESKTOP=1 ;;
+        --autostart) DESKTOP=1 AUTOSTART=1 ;;
+        --stop) STOP=1 ;;
+        *) echo "usage: $0 [--desktop|--autostart|--stop]" >&2; exit 2 ;;
+    esac
+done
+
 CONFIG=${KIDNYCE_KIOSK_CONFIG:-/etc/kidnyce-karaoke/kiosk.env}
 # shellcheck source=/dev/null
 [[ -f "$CONFIG" ]] && source "$CONFIG"
@@ -25,7 +43,14 @@ DISPLAY_MODE=${DISPLAY_MODE:-1920x1080}
 AUDIO_OUT=${AUDIO_OUT:-hdmi-singer}
 POLL_SECONDS=${POLL_SECONDS:-5}
 PROFILE_ROOT=${PROFILE_ROOT:-$HOME/.config/kidnyce-kiosk}
-LOG=${KIOSK_LOG:-$HOME/kiosk.log}
+if ((DESKTOP || STOP)); then
+    mkdir -p "$HOME/.cache/kidnyce-karaoke"
+    LOG=${KIOSK_LOG:-$HOME/.cache/kidnyce-karaoke/screens.log}
+else
+    LOG=${KIOSK_LOG:-$HOME/kiosk.log}
+fi
+RUN_DIR=${XDG_RUNTIME_DIR:-$HOME/.cache/kidnyce-karaoke}
+PID_FILE=$RUN_DIR/kidnyce-karaoke-screens.pid
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
 
@@ -33,13 +58,17 @@ browser_bin() {
     command -v chromium || command -v chromium-browser
 }
 
+# Under a Wayland desktop, Xwayland names the ports HDMI-A-1 and HDMI-A-2.
+# The app and the sound mapping know them as HDMI-1 and HDMI-2, as X does.
 connected_outputs() {
-    xrandr --query | awk '$2 == "connected" {print $1}'
+    xrandr --query | awk '$2 == "connected" {n = $1; sub(/^HDMI-A-/, "HDMI-", n); print n}'
 }
 
 # "1920x1080+1920+0" for an output, or nothing when it is off.
 geometry_of() {
-    xrandr --query | awk -v o="$1" '$1 == o && $2 == "connected" {
+    local alt=$1
+    [[ $1 =~ ^HDMI-([0-9]+)$ ]] && alt=HDMI-A-${BASH_REMATCH[1]}
+    xrandr --query | awk -v o="$1" -v a="$alt" '($1 == o || $1 == a) && $2 == "connected" {
         for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/) {print $i; exit}
     }'
 }
@@ -100,12 +129,36 @@ sound_choice() {
     esac
 }
 
+# On a desktop PipeWire holds the sound cards, so the browser plays through
+# the PipeWire sink of the chosen card instead of opening it directly.
+# Prints the sink name for an ALSA device such as plughw:CARD=Headphones,DEV=0.
+pulse_sink() {
+    local id index
+    id=$(sed -n 's/.*CARD=\([^,]*\).*/\1/p' <<<"$1")
+    [[ -n $id ]] && command -v pactl >/dev/null || return 1
+    index=$(readlink "/proc/asound/$id" 2>/dev/null) || return 1
+    index=${index#card}
+    LC_ALL=C pactl list sinks 2>/dev/null | awk -v c="$index" '
+        /^Sink #/ {name = ""}
+        /^[ \t]+Name: / {name = $2}
+        $1 == "alsa.card" {v = $3; gsub(/"/, "", v); if (v == c && name != "") {print name; exit}}' | grep .
+}
+
 # Set the hardware volume of the card behind an ALSA device, such as
 # plughw:CARD=Headphones,DEV=0, on its first playback volume control. The
 # app keeps the level, so it comes back on every start without alsactl.
 apply_level() {
     local device=$1 level=$2 card control
     [[ $level =~ ^[0-9]+$ ]] && ((level <= 100)) || return 0
+    if [[ -n $SOUND_SINK ]]; then
+        if pactl set-sink-volume "$SOUND_SINK" "$level%" 2>/dev/null; then
+            pactl set-sink-mute "$SOUND_SINK" 0 2>/dev/null
+            log "volume: $SOUND_SINK at $level%"
+        else
+            log "could not set $SOUND_SINK to $level%"
+        fi
+        return 0
+    fi
     card=$(sed -n 's/.*CARD=\([^,]*\).*/\1/p' <<<"$device")
     [[ -n $card ]] || return 0
     control=$(amixer -c "$card" scontents 2>/dev/null | awk -F"'" '
@@ -160,8 +213,9 @@ launch() {
         --disable-pinch \
         --overscroll-history-navigation=0 \
         --disable-dev-shm-usage \
+        "${BROWSER_FLAGS[@]}" \
         "$@" \
-        "$url" >>"$LOG" 2>&1 &
+        "$url" >>"$LOG" 2>&1 9>&- &
     PIDS[$name]=$!
     log "started $name screen at ${w}x${h}+${x}+${y}: $url"
 }
@@ -189,11 +243,14 @@ apply_layout() {
     while read -r role output path; do
         [[ $role =~ ^(singer|crowd|all)$ && $path =~ ^/[A-Za-z0-9/?=\&_.-]*$ ]] || continue
         grep -qxF -- "$output" <<<"$outputs" || continue
+        # A desktop port the desktop has turned off is not used.
+        ((DESKTOP)) && [[ -z $(geometry_of "$output") ]] && continue
         roles+=("$role") ports+=("$output") paths+=("$path")
     done <<<"$plan"
     ((${#roles[@]})) || return 1
 
-    while read -r output; do
+    # On a desktop the monitor layout belongs to the desktop.
+    while ((!DESKTOP)) && read -r output; do
         [[ -z $output ]] && continue
         if [[ " ${ports[*]} " != *" $output "* ]]; then
             xrandr --output "$output" --off
@@ -203,10 +260,12 @@ apply_layout() {
 
     local i
     for i in "${!roles[@]}"; do
-        if [[ -z $previous ]]; then
-            set_mode "${ports[i]}" --pos 0x0 --primary
-        else
-            set_mode "${ports[i]}" --right-of "$previous"
+        if ((!DESKTOP)); then
+            if [[ -z $previous ]]; then
+                set_mode "${ports[i]}" --pos 0x0 --primary
+            else
+                set_mode "${ports[i]}" --right-of "$previous"
+            fi
         fi
         previous=${ports[i]}
         [[ ${roles[i]} == crowd ]] && crowd=${ports[i]}
@@ -215,9 +274,17 @@ apply_layout() {
 
     local device
     device=$(alsa_device "$sound" "$crowd")
-    SOUND_DEVICE=$device
+    SOUND_DEVICE=$device SOUND_SINK=""
     local -a audio_flags=()
-    [[ $device != pulse ]] && audio_flags=(--alsa-output-device="$device")
+    unset PULSE_SINK
+    if ((DESKTOP)) && SOUND_SINK=$(pulse_sink "$device"); then
+        export PULSE_SINK=$SOUND_SINK
+        device="pipewire $SOUND_SINK"
+    elif ((DESKTOP)) && [[ $device == default ]]; then
+        device="the desktop's sound output"
+    elif [[ $device != pulse ]]; then
+        audio_flags=(--alsa-output-device="$device")
+    fi
 
     for i in "${!roles[@]}"; do
         if [[ ${roles[i]} == crowd ]]; then
@@ -236,24 +303,68 @@ stop_all() {
     PIDS=()
 }
 
+# Close a desktop run started from the icon or at login.
+stop_desktop() {
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null) || { echo "The karaoke screens are not open."; return 0; }
+    # A stale file could name some other process by now: check it is this script.
+    if [[ $pid =~ ^[0-9]+$ ]] && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'kiosk-session' &&
+        kill "$pid" 2>/dev/null; then
+        echo "Closing the karaoke screens."
+    else
+        echo "The karaoke screens are not open."
+    fi
+    rm -f "$PID_FILE"
+}
+
+# At desktop login, open the screens only when the host turned that on.
+autostart_wanted() {
+    curl --silent --fail --max-time 3 --get \
+        --data-urlencode "connected=$(connected_outputs | paste -sd, -)" "$APP_URL/api/display/layout" |
+        jq -e '.desktop.autostart == true' >/dev/null
+}
+
 main() {
+    if ((STOP)); then
+        stop_desktop
+        exit 0
+    fi
     BROWSER=$(browser_bin) || { log "chromium is not installed"; exit 1; }
     declare -gA PIDS=()
+    BROWSER_FLAGS=()
 
-    # Never blank, never sleep.
-    xset s off s noblank -dpms 2>/dev/null
-
-    # Without PipeWire or PulseAudio in this session Chromium uses ALSA directly.
-    # Pointing Pulse at nothing makes that choice explicit unless asked for.
-    if [[ $AUDIO_OUT != pulse ]]; then
-        export PULSE_SERVER=unix:/nonexistent
+    if ((DESKTOP)); then
+        mkdir -p "$RUN_DIR"
+        # One run per desktop: a second click leaves the open screens alone.
+        exec 9>"$RUN_DIR/kidnyce-karaoke-screens.lock"
+        if ! flock -n 9; then
+            log "the screens are already open"
+            exit 0
+        fi
+        echo $$ >"$PID_FILE"
+        # Wayland desktops: Chromium under Xwayland so it can be placed per port.
+        [[ -n ${WAYLAND_DISPLAY:-} ]] && BROWSER_FLAGS+=(--ozone-platform=x11)
+    else
+        # Never blank, never sleep.
+        xset s off s noblank -dpms 2>/dev/null
+        # Without PipeWire or PulseAudio in this session Chromium uses ALSA directly.
+        # Pointing Pulse at nothing makes that choice explicit unless asked for.
+        if [[ $AUDIO_OUT != pulse ]]; then
+            export PULSE_SERVER=unix:/nonexistent
+        fi
     fi
 
     wait_for_app
-    trap 'stop_all; exit 0' TERM INT
+    if ((AUTOSTART)) && ! autostart_wanted; then
+        log "desktop login: opening the screens is off in Settings, Screens"
+        rm -f "$PID_FILE"
+        exit 0
+    fi
+    trap 'stop_all; ((DESKTOP)) && rm -f "$PID_FILE"; exit 0' TERM INT
+    ((DESKTOP)) && log "desktop run started"
 
     local now reply plan current_plan="" current_outputs="" name dead sound_line choice level applied_level=""
-    SOUND_OUT=$AUDIO_OUT SOUND_DEVICE=""
+    SOUND_OUT=$AUDIO_OUT SOUND_DEVICE="" SOUND_SINK=""
     while true; do
         now=$(connected_outputs)
         if reply=$(fetch_layout "$now"); then
@@ -272,6 +383,13 @@ main() {
         for name in "${!PIDS[@]}"; do
             kill -0 "${PIDS[$name]}" 2>/dev/null || dead=1
         done
+        # On a desktop, closing a screen means done: back to the desktop.
+        if ((DESKTOP && dead)); then
+            log "a screen was closed: closing the karaoke screens"
+            stop_all
+            rm -f "$PID_FILE"
+            exit 0
+        fi
         if [[ $plan != "$current_plan" || $now != "$current_outputs" || $dead == 1 ]]; then
             if ((${#PIDS[@]})); then
                 log "screens changed, setting changed or a browser exited: relaunching"

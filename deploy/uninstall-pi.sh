@@ -36,6 +36,10 @@ if [[ ! -e /etc/nginx/sites-enabled/default && -f /etc/nginx/sites-available/def
 fi
 if nginx -t -q 2>/dev/null; then systemctl reload nginx 2>/dev/null || true; fi
 
+pkill -f kiosk-session.sh 2>/dev/null || true
+rm -f /usr/share/applications/kidnyce-karaoke-{screens,stop,host}.desktop \
+    /etc/xdg/autostart/kidnyce-karaoke-screens.desktop \
+    /usr/share/icons/hicolor/256x256/apps/kidnyce-karaoke.png /home/*/Desktop/kidnyce-karaoke-*.desktop
 pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
 rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns

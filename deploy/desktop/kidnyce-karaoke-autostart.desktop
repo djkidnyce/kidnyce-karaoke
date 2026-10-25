@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Karaoke Screens at login
+Comment=Opens the karaoke screens at desktop login when Settings, Screens says to.
+Exec=@@PREFIX@@/kiosk/kiosk-session.sh --autostart
+Icon=kidnyce-karaoke
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

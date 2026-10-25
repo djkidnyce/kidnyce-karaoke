@@ -256,6 +256,21 @@ check "kidnyce-karaoke audio volume 75" bash -c "kidnyce-karaoke audio volume 75
 check "kidnyce-karaoke audio refuses a bare word" bash -c "! kidnyce-karaoke audio card 2>/dev/null"
 check "kidnyce-karaoke audio volume refuses 101" bash -c "! kidnyce-karaoke audio volume 101 2>/dev/null"
 check "the screens get the sound choice" bash -c "curl -fs 'http://127.0.0.1:$PORT/api/display/layout?connected=HDMI-1' | jq -e '.audio == {output: \"usb\", level: 75}' >/dev/null"
+# This run has no kiosk (no X packages here), so check the launchers in a dry run.
+id kndesk >/dev/null 2>&1 || useradd --create-home kndesk
+SUDO_USER=kndesk "$ROOT/deploy/install-pi.sh" --dry-run --yes --skip-hw-check --no-ddns --dns-provider selfsigned \
+    --boot desktop 3>&1 >"$WORK/dry-desktop.out" 2>&1
+check "launchers go in the menu and the login autostart" bash -c "grep -qF 'write /usr/share/applications/kidnyce-karaoke-screens.desktop' '$WORK/dry-desktop.out' &&
+    grep -qF 'write /usr/share/applications/kidnyce-karaoke-stop.desktop' '$WORK/dry-desktop.out' &&
+    grep -qF 'write /etc/xdg/autostart/kidnyce-karaoke-screens.desktop' '$WORK/dry-desktop.out'"
+check "launchers go on the installing user's desktop" grep -qF 'write /home/kndesk/Desktop/kidnyce-karaoke-screens.desktop (755 kndesk:kndesk)' "$WORK/dry-desktop.out"
+check "--boot desktop without a desktop falls back to the screens" grep -q 'Boot: *karaoke screens' "$WORK/dry-desktop.out"
+userdel --remove kndesk 2>/dev/null
+if command -v desktop-file-validate >/dev/null; then
+    check "launcher files are valid desktop entries" desktop-file-validate "$ROOT"/deploy/desktop/*.desktop
+fi
+check "desktop-autostart on reaches the screens" bash -c "kidnyce-karaoke desktop-autostart on >/dev/null && curl -fs 'http://127.0.0.1:$PORT/api/display/layout' | jq -e '.desktop.autostart == true' >/dev/null"
+check "desktop-autostart off" bash -c "kidnyce-karaoke desktop-autostart off >/dev/null && curl -fs 'http://127.0.0.1:$PORT/api/display/layout' | jq -e '.desktop.autostart == false' >/dev/null"
 check "kidnyce-karaoke audio reset" bash -c "kidnyce-karaoke audio reset >/dev/null && kidnyce-karaoke audio volume keep >/dev/null && kidnyce-karaoke audio | grep -q '^Sound out: install default'"
 
 check "nftables table loads and unloads" bash -c "nft -f /etc/kidnyce-karaoke/firewall.nft && nft list table inet kidnyce_fw >/dev/null && nft delete table inet kidnyce_fw"

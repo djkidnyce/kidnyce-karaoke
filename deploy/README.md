@@ -65,7 +65,8 @@ way and skips that step: copy it to the Pi, unpack it, and run the same command 
 
 It takes about 10 minutes on a Pi 4. At the end it prints the admin password (once;
 `sudo kidnyce-karaoke password` shows it again) and the join code. Reboot once:
-`sudo reboot`. The screens come up on their own.
+`sudo reboot`. The screens come up on their own, or in desktop mode from the Karaoke
+Screens icon.
 
 Run the same command again any time to update (`git pull` first on a clone). Songs,
 settings, play history, the certificate and the admin password are kept.
@@ -73,6 +74,8 @@ settings, play history, the certificate and the admin password are kept.
 ### Useful options
 
 ```text
+--boot desktop            keep the Pi's desktop; open the screens from an icon (see Desktop mode)
+--desktop-autostart on    with --boot desktop: open the screens at desktop login
 --audio usb               player sound to a USB audio interface (default: singer TV over HDMI)
 --audio headphones        player sound to the 3.5 mm jack
 --screens single          one screen for everything even with two TVs (default: auto)
@@ -86,6 +89,40 @@ settings, play history, the certificate and the admin password are kept.
 ```
 
 `sudo ./deploy/install-pi.sh --help` lists everything.
+
+## Boot to the screens, or keep the desktop
+
+Two ways to run, and you can switch any time:
+
+| Mode | What happens at boot |
+| --- | --- |
+| Karaoke (default) | The Pi skips the desktop and goes straight to the screens. Best for gigs: nothing to click, and a crash restarts the screens on its own. |
+| Desktop | The Pi boots to its normal desktop. The app still starts at boot, so phones work right away. The screens open when you double click **Karaoke Screens** on the desktop. |
+
+Install in desktop mode with `--boot desktop`, or switch later with
+`sudo kidnyce-karaoke mode desktop` (and `mode karaoke` to go back). Both reboot. A
+rerun of the installer keeps the mode you are in. Desktop mode needs Raspberry Pi OS
+with desktop, not Lite. If the installer finds a desktop login and you answer no to
+replacing it, you get desktop mode.
+
+Every install puts these in the menu under Sound & Video, and the first two on the
+desktop of the user who ran the installer:
+
+| Icon | Does |
+| --- | --- |
+| Karaoke Screens | Opens the singer and room screens full screen, the same layout as Settings, Screens. A second click does nothing while they are open. |
+| Karaoke Host | Opens `https://karaoke.kidnyce.com` in the browser, for the host page and Settings. |
+| Close Karaoke Screens | Closes the screens. Alt+F4 on either screen does the same. |
+
+To open the screens at desktop login without clicking, tick Settings, Screens,
+"Desktop mode: open the screens when the desktop starts", or run
+`sudo kidnyce-karaoke desktop-autostart on`. It is off by default.
+
+In desktop mode the screens use the monitor layout from the desktop's Screen
+Configuration instead of setting it themselves. Sound plays through the desktop's
+audio (PipeWire), on the output picked in Settings, Sound, and the device volume
+there sets that output's volume. Turn off screen blanking in Raspberry Pi
+Configuration, Display, so the TVs stay on during a long song.
 
 ## Screens: one or two
 
@@ -246,13 +283,17 @@ SSH in over Ethernet.
 ### Desktop and karaoke mode
 
 ```text
-sudo kidnyce-karaoke mode desktop       Raspberry Pi OS desktop, screens off (reboots)
-sudo kidnyce-karaoke mode karaoke       back to the karaoke screens (reboots)
+sudo kidnyce-karaoke mode                    which mode the Pi boots in
+sudo kidnyce-karaoke mode desktop            boot to the desktop, screens from the icon (reboots)
+sudo kidnyce-karaoke mode karaoke            boot straight to the screens (reboots)
+sudo kidnyce-karaoke desktop-autostart on    desktop mode: open the screens at login
+sudo kidnyce-karaoke desktop-autostart off   desktop mode: only from the icon (default)
 ```
 
-Desktop mode is for setup work that needs the full desktop, such as the desktop WiFi
-menu or Bluetooth. The app keeps running, so phones still work. It needs Raspberry Pi
-OS with desktop, not Lite. On Lite, use `wifi` above.
+The app keeps running in both modes, so phones still work. Desktop mode also helps
+with setup work that needs the full desktop, such as the desktop WiFi menu or
+Bluetooth. It needs Raspberry Pi OS with desktop, not Lite. On Lite, use `wifi` above.
+See [Boot to the screens, or keep the desktop](#boot-to-the-screens-or-keep-the-desktop).
 
 ### Services and updates
 
@@ -298,7 +339,8 @@ add `karaoke.kidnyce.com` pointing at it. Guests join your SSID and scan.
 | Certificate | `/etc/letsencrypt/live/kidnyce-karaoke/` | ECDSA on the NIST P256 curve, renewed by `certbot.timer`, Nginx reloaded after renewal. |
 | DNS record | `kidnyce-karaoke-ddns.timer` | Every 5 minutes; only ever publishes a private address. |
 | Firewall | `kidnyce-karaoke-firewall.service`, table `inet kidnyce_fw` | Inbound 80/443/22 from private ranges only. |
-| Screens | user `kiosk`, autologin on tty1, `/opt/kidnyce-karaoke/kiosk/kiosk-session.sh` | X11 with no window manager, one Chromium per screen. Every 5 seconds it reports the connected ports to the app and gets back which page goes where. Relaunches on a crash, a hotplug or a change in Settings. |
+| Screens | user `kiosk`, autologin on tty1, `/opt/kidnyce-karaoke/kiosk/kiosk-session.sh` | X11 with no window manager, one Chromium per screen. Every 5 seconds it reports the connected ports to the app and gets back which page goes where. Relaunches on a crash, a hotplug or a change in Settings. In desktop mode the same script runs in the desktop session instead, started by the icon or `/etc/xdg/autostart`. |
+| Launchers | `/usr/share/applications/kidnyce-karaoke-*.desktop`, `~/Desktop` | Karaoke Screens, Karaoke Host, Close Karaoke Screens. |
 | `yt-dlp` | `kidnyce-karaoke-ytdlp.timer` | Weekly update; YouTube changes often. |
 | Deno 2.9.6 | `/opt/kidnyce-karaoke/bin/deno` | Checksum verified. `yt-dlp` needs it for YouTube. |
 

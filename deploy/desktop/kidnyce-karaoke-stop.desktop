@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Close Karaoke Screens
+Comment=Close the karaoke screens and go back to the desktop. The app keeps running.
+Exec=@@PREFIX@@/kiosk/kiosk-session.sh --stop
+Icon=kidnyce-karaoke
+Terminal=false
+Categories=AudioVideo;

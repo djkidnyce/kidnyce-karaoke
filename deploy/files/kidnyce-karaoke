@@ -15,7 +15,8 @@
 #   kidnyce-karaoke audio [OUT|reset]          show or set where the sound goes
 #   kidnyce-karaoke audio volume 0-100|keep    device volume, kept after a reboot
 #   kidnyce-karaoke wifi            join a venue's WiFi from the console
-#   kidnyce-karaoke mode desktop|karaoke       switch to the desktop and back (reboots)
+#   kidnyce-karaoke mode [desktop|karaoke]     keep the desktop, or boot to the screens (reboots)
+#   kidnyce-karaoke desktop-autostart on|off   desktop mode: open the screens at login
 #   kidnyce-karaoke logs [app|nginx|screens|ddns]
 #   kidnyce-karaoke restart [app|screens|all]
 #   kidnyce-karaoke update-ytdlp    pull the newest yt-dlp now
@@ -200,11 +201,21 @@ cmd_wifi() {
 
 # Desktop mode turns the Raspberry Pi OS desktop back on and stops the screens
 # from taking over tty1; karaoke mode undoes it. The app keeps running in both.
+# Record the boot mode, so a rerun of the installer keeps it.
+set_boot_mode() {
+    local env=$ETC_DIR/kiosk.env
+    if grep -q '^BOOT_MODE=' "$env" 2>/dev/null; then
+        sed -i "s/^BOOT_MODE=.*/BOOT_MODE=$1/" "$env"
+    else
+        echo "BOOT_MODE=$1" >>"$env"
+    fi
+}
+
 cmd_mode() {
-    need_root mode
     local dropin=/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
     case "${1:-}" in
         desktop)
+            need_root mode
             # The installer disabled the login screen, which removes the
             # display-manager.service alias, so look for the real unit.
             local dm="" unit
@@ -212,27 +223,44 @@ cmd_mode() {
                 if systemctl cat "$unit.service" >/dev/null 2>&1; then dm=$unit; break; fi
             done
             [[ -n $dm ]] || { echo "No desktop is installed (Raspberry Pi OS Lite). For WiFi use: sudo kidnyce-karaoke wifi" >&2; exit 1; }
-            if [[ -f $dropin ]]; then mv -f "$dropin" "$dropin.off"; fi
+            rm -f "$dropin" "$dropin.off"
+            set_boot_mode desktop
             systemctl daemon-reload
             systemctl enable --force "$dm.service" >/dev/null 2>&1
             systemctl set-default graphical.target >/dev/null
-            echo "Desktop mode set. Rebooting in 5 seconds. Back to the screens: sudo kidnyce-karaoke mode karaoke"
+            echo "Desktop mode set. The app still starts at boot. Open the screens with the"
+            echo "Karaoke Screens icon, or turn on Settings, Screens, 'open the screens when the desktop starts'."
+            echo "Rebooting in 5 seconds. Back to the screens at boot: sudo kidnyce-karaoke mode karaoke"
             ;;
         karaoke)
-            if [[ -f $dropin.off ]]; then mv -f "$dropin.off" "$dropin"; fi
+            need_root mode
+            mkdir -p "${dropin%/*}"
+            printf '%s\n' "# Written by kidnyce-karaoke mode karaoke: log the kiosk user in on tty1 so the screens start at boot." \
+                "[Service]" "ExecStart=" "ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM" >"$dropin"
+            rm -f "$dropin.off"
+            set_boot_mode karaoke
             systemctl daemon-reload
             systemctl disable display-manager.service >/dev/null 2>&1 || true
             systemctl set-default multi-user.target >/dev/null
             echo "Karaoke mode set. Rebooting in 5 seconds."
             ;;
         *)
-            if [[ -f $dropin ]]; then echo "Mode: karaoke"; else echo "Mode: desktop"; fi
+            if [[ -f $dropin ]]; then echo "Mode: karaoke (boots to the screens)"; else echo "Mode: desktop (Karaoke Screens icon opens the screens)"; fi
             echo "Usage: sudo kidnyce-karaoke mode desktop|karaoke"
             return
             ;;
     esac
     sleep 5
     systemctl reboot
+}
+
+cmd_desktop_autostart() {
+    need_root desktop-autostart
+    case "${1:-}" in
+        on) set_pref desktop_screens_on_login True; echo "Desktop mode: the screens open when the desktop starts." ;;
+        off) set_pref desktop_screens_on_login False; echo "Desktop mode: open the screens with the Karaoke Screens icon." ;;
+        *) echo "Usage: kidnyce-karaoke desktop-autostart on|off" >&2; exit 1 ;;
+    esac
 }
 
 cert_days_left() {
@@ -298,15 +326,27 @@ cmd_doctor() {
     fi
 
     if [[ ${KIOSK:-0} == 1 ]]; then
-        if pgrep -u "$KIOSK_USER" -f 'kiosk-session.sh' >/dev/null; then ok "screen session running"; else warn "screen session not running (is a TV plugged in? check: kidnyce-karaoke logs screens)"; fi
-        local role up=()
+        local role up=() owner=(-u "$KIOSK_USER")
+        if [[ ! -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf ]]; then
+            # Desktop mode: the screens run in the desktop user's session, when opened.
+            owner=()
+            if pgrep -f 'kiosk-session.sh --(desktop|autostart)' >/dev/null; then
+                ok "desktop mode: the screens are open"
+            else
+                ok "desktop mode: the screens are closed. Open them with the Karaoke Screens icon."
+            fi
+        elif pgrep -u "$KIOSK_USER" -f 'kiosk-session.sh' >/dev/null; then
+            ok "screen session running"
+        else
+            warn "screen session not running (is a TV plugged in? check: kidnyce-karaoke logs screens)"
+        fi
         for role in singer crowd all; do
-            [[ -n $(pgrep -u "$KIOSK_USER" -f -- "--user-data-dir=.*/$role( |$)" || true) ]] && up+=("$role")
+            [[ -n $(pgrep "${owner[@]}" -f -- "--user-data-dir=.*kidnyce-kiosk/$role( |$)" || true) ]] && up+=("$role")
         done
         case "${up[*]}" in
             "singer crowd") ok "two screens up: singer and room" ;;
             all) ok "one screen up, showing everything (sudo kidnyce-karaoke screens for details)" ;;
-            "") warn "no screen browser running (is a TV plugged in? check: kidnyce-karaoke logs screens)" ;;
+            "") ((${#owner[@]})) && warn "no screen browser running (is a TV plugged in? check: kidnyce-karaoke logs screens)" ;;
             *) warn "screens up: ${up[*]} (sudo kidnyce-karaoke screens for details)" ;;
         esac
         if command -v aplay >/dev/null; then echo "  Sound devices:"; aplay -l 2>/dev/null | awk '/^card/ {print "    " $0}'; fi
@@ -321,7 +361,14 @@ cmd_logs() {
     case "${1:-app}" in
         app) journalctl -u kidnyce-karaoke -n 200 --no-pager ;;
         nginx) tail -n 100 /var/log/nginx/error.log ;;
-        screens) tail -n 200 "/home/$KIOSK_USER/kiosk.log" ;;
+        screens)
+            tail -n 200 "/home/$KIOSK_USER/kiosk.log" 2>/dev/null
+            # Desktop mode logs to the desktop user's home.
+            local f
+            for f in /home/*/.cache/kidnyce-karaoke/screens.log; do
+                [[ -r $f ]] && { echo "== $f"; tail -n 100 "$f"; }
+            done
+            ;;
         ddns) journalctl -u kidnyce-karaoke-ddns -n 50 --no-pager ;;
         *) echo "logs: app, nginx, screens or ddns" >&2; exit 1 ;;
     esac
@@ -331,8 +378,9 @@ cmd_restart() {
     need_root restart
     case "${1:-all}" in
         app) systemctl restart kidnyce-karaoke ;;
-        screens) pkill -u "$KIOSK_USER" -f kiosk-session.sh || true ;;
-        all) systemctl restart kidnyce-karaoke nginx; pkill -u "$KIOSK_USER" -f kiosk-session.sh || true ;;
+        # Karaoke mode: getty starts the screens again. Desktop mode: they close; reopen from the icon.
+        screens) pkill -f kiosk-session.sh || true ;;
+        all) systemctl restart kidnyce-karaoke nginx; pkill -f kiosk-session.sh || true ;;
         *) echo "restart: app, screens or all" >&2; exit 1 ;;
     esac
 }
@@ -346,6 +394,7 @@ case "${1:-status}" in
     doctor) cmd_doctor ;;
     screens) cmd_screens "${2:-show}" "${3:-}" ;;
     code-on-boot) cmd_code_on_boot "${2:-}" ;;
+    desktop-autostart) cmd_desktop_autostart "${2:-}" ;;
     audio) cmd_audio "${2:-show}" "${3:-}" ;;
     wifi) cmd_wifi ;;
     mode) cmd_mode "${2:-}" ;;
@@ -353,6 +402,6 @@ case "${1:-status}" in
     restart) cmd_restart "${2:-all}" ;;
     update-ytdlp) need_root update-ytdlp; systemctl start kidnyce-karaoke-ytdlp; "$PREFIX/venv/bin/python" -I -m yt_dlp --version ;;
     ddns) need_root ddns; /usr/local/sbin/kidnyce-karaoke-ddns && echo "DNS record checked." ;;
-    -h | --help | help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+    -h | --help | help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) echo "Unknown command: $1 (try: kidnyce-karaoke help)" >&2; exit 1 ;;
 esac

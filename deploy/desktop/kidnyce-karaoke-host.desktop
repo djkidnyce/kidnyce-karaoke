@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Karaoke Host
+Comment=Open the host page and Settings in the browser.
+Exec=xdg-open https://@@DOMAIN@@/
+Icon=kidnyce-karaoke
+Terminal=false
+Categories=AudioVideo;

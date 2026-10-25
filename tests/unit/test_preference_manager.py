@@ -307,6 +307,7 @@ def test_preference_manager_defaults_exist():
         "new_join_code_on_start",
         "audio_output",
         "audio_level",
+        "desktop_screens_on_login",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys

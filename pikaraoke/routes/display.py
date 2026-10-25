@@ -99,7 +99,8 @@ def layout():
     k = get_karaoke_instance()
     connected = parse_outputs(request.args.get("connected"))
     k.kiosk_report.update(connected)
-    return jsonify({**_plan(connected).as_payload(), "audio": _audio(k)})
+    desktop = {"autostart": k.preferences.get_or_default("desktop_screens_on_login") is True}
+    return jsonify({**_plan(connected).as_payload(), "audio": _audio(k), "desktop": desktop})
 
 
 def _audio(k) -> dict:

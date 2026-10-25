@@ -72,6 +72,8 @@ class PreferenceManager:
         # Sound out of the Pi: "" keeps the installer's AUDIO_OUT; level -1 leaves the mixer alone
         "audio_output": "",
         "audio_level": -1,
+        # Desktop mode: open the screens when the desktop logs in
+        "desktop_screens_on_login": False,
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:

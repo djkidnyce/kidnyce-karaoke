@@ -72,15 +72,30 @@ start_x() {
 }
 
 start_session() {
+    # Keep every run's log for a failure report.
+    [[ -f $WORK/kiosk.log ]] && cat "$WORK/kiosk.log" >>"$WORK/kiosk-all.log"
     : >"$WORK/kiosk.log"
-    env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy \
-        PATH="$WORK/bin:$PATH" HOME="$WORK/home" KIDNYCE_KIOSK_CONFIG="$WORK/kiosk.env" \
-        KIOSK_LOG="$WORK/kiosk.log" DISPLAY=":$1" "$SESSION" >/dev/null 2>&1 &
+    # exec, so S_PID is the session itself and stop_all really stops it.
+    (exec_session ":$1" "${@:2}") &
     S_PID=$!
 }
 
+# The session script with this test's settings, in place of the calling
+# shell. DISPLAY first, then its flags.
+exec_session() {
+    mkdir -p "$WORK/run"
+    exec env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy \
+        PATH="$WORK/bin:$PATH" HOME="$WORK/home" KIDNYCE_KIOSK_CONFIG="$WORK/kiosk.env" \
+        XDG_RUNTIME_DIR="$WORK/run" KIOSK_LOG="$WORK/kiosk.log" DISPLAY="$1" "$SESSION" "${@:2}" >/dev/null 2>&1
+}
+
+# One run that waits for the script to finish (a second click, --stop).
+session() { (exec_session "$@"); }
+
 stop_all() {
     [[ -n $S_PID ]] && kill "$S_PID" 2>/dev/null
+    local pid
+    for pid in $(pgrep -f "^bash $SESSION"); do kill "$pid" 2>/dev/null; done
     sleep 1
     pkill -x chrome 2>/dev/null
     [[ -n $X_PID ]] && kill "$X_PID" 2>/dev/null
@@ -91,7 +106,8 @@ stop_all() {
 
 host_defaults() {
     "$CLI" screens auto >/dev/null && "$CLI" screens swap off >/dev/null && "$CLI" screens port auto >/dev/null &&
-        "$CLI" audio reset >/dev/null && "$CLI" audio volume keep >/dev/null
+        "$CLI" audio reset >/dev/null && "$CLI" audio volume keep >/dev/null &&
+        "$CLI" desktop-autostart off >/dev/null
 }
 trap 'stop_all; host_defaults' EXIT
 
@@ -158,10 +174,12 @@ kill "$(pgrep -f 'kidnyce-kiosk/crowd' -o)" 2>/dev/null
 check "a crashed browser is relaunched" wait_log "started crowd screen" 2
 
 status=$("$CLI" screens)
-check "the app sees both ports and what each shows" bash -c \
-    "grep -qF 'DUMMY0 [DUMMY0]: TV, showing singer' <<<'$status' &&
-     grep -qF 'DUMMY1 [DUMMY1]: TV, showing crowd' <<<'$status' &&
-     grep -q 'checked in' <<<'$status'"
+if grep -qF 'DUMMY0 [DUMMY0]: TV, showing singer' <<<"$status" &&
+    grep -qF 'DUMMY1 [DUMMY1]: TV, showing crowd' <<<"$status" && grep -q 'checked in' <<<"$status"; then
+    pass "the app sees both ports and what each shows"
+else
+    fail "the app sees both ports and what each shows: $(tr '\n' '|' <<<"$status")"
+fi
 
 echo "== Host picks one screen for everything"
 "$CLI" screens single >/dev/null
@@ -211,6 +229,42 @@ wait_log "started all screen"
 sleep 2
 check "one TV shows everything" grep -F "started all screen at 1920x1080+0+0: $APP/splash?all=1" "$WORK/kiosk.log"
 check "no room screen without a second TV" test "$(started crowd)" -eq 0
+stop_all
+
+echo "== Desktop mode: the desktop owns the monitors"
+start_x 93
+DISPLAY=:93 xrandr --addmode DUMMY1 1280x1024
+DISPLAY=:93 xrandr --output DUMMY0 --mode 1600x1200 --output DUMMY1 --mode 1280x1024 --pos 1600x0
+start_session 93 --desktop
+wait_log "started crowd screen"
+sleep 3
+layout=$(outputs 93)
+check "the desktop's monitor modes are left alone" \
+    bash -c "grep -qx 'DUMMY0 1600x1200+0+0' <<<'$layout' && grep -qx 'DUMMY1 1280x1024+1600+0' <<<'$layout'"
+check "singer screen fills the first monitor" grep -F "started singer screen at 1600x1200+0+0" "$WORK/kiosk.log"
+check "room screen fills the second monitor" grep -F "started crowd screen at 1280x1024+1600+0" "$WORK/kiosk.log"
+session :93 --desktop
+check "a second click leaves the open screens alone" grep -F "the screens are already open" "$WORK/kiosk.log"
+check "still one singer screen" test "$(grep -c 'started singer screen' "$WORK/kiosk.log")" -eq 1
+kill "$(pgrep -f 'kidnyce-kiosk/crowd' -o)" 2>/dev/null
+check "closing a screen closes them all" wait_log "a screen was closed"
+sleep 2
+check "the session ended" bash -c "! kill -0 $S_PID 2>/dev/null"
+check "no browsers left" test -z "$(pgrep -f 'kidnyce-kiosk/(singer|crowd)')"
+
+start_session 93 --desktop
+wait_log "started crowd screen"
+session :93 --stop
+sleep 3
+check "Close Karaoke Screens closes them" bash -c "! kill -0 $S_PID 2>/dev/null && test -z \"\$(pgrep -f 'kidnyce-kiosk/(singer|crowd)')\""
+
+echo "== Desktop login"
+start_session 93 --autostart
+check "autostart does nothing while the setting is off" wait_log "opening the screens is off"
+"$CLI" desktop-autostart on >/dev/null
+start_session 93 --autostart
+check "autostart opens the screens when the setting is on" wait_log "started crowd screen"
+"$CLI" desktop-autostart off >/dev/null
 stop_all
 
 echo

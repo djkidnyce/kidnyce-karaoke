@@ -16,6 +16,8 @@
 #   8. An nftables firewall: HTTPS and SSH from private networks only
 #   9. The kiosk screens: two (singer and room) when two TVs are plugged in,
 #      else one for everything. The host can choose in Settings, Screens.
+#      With --boot desktop the Pi keeps its desktop and the screens open from
+#      a Karaoke Screens icon instead (or at login, if Settings says so).
 #
 # Run it again any time: it is idempotent and keeps your songs, settings,
 # certificate and admin password.
@@ -26,8 +28,8 @@
 # See deploy/README.md for every option and the Cloudflare token setup.
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.2.0"
-APP_VERSION="1.23.0+kidnyce.7"
+INSTALLER_VERSION="1.3.0"
+APP_VERSION="1.23.0+kidnyce.8"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -58,6 +60,9 @@ SWAP_SCREENS=0
 DISPLAY_MODE="1920x1080"
 AUDIO_OUT="hdmi-singer"
 AUDIO_SET=0
+BOOT_MODE="karaoke"
+BOOT_SET=0
+DESKTOP_AUTOSTART=""
 FORCE_HDMI=0
 FIREWALL=1
 DDNS=1
@@ -117,6 +122,10 @@ Options:
   --swap-screens           Singer screen on HDMI1 and room screen on HDMI0
   --display-mode WxH       Resolution for the screens (default: $DISPLAY_MODE)
   --audio OUT              hdmi-singer (default), hdmi-crowd, headphones, usb, pulse or an ALSA PCM
+  --boot MODE              karaoke (default: the Pi boots straight to the screens) or
+                           desktop (keeps the desktop; a Karaoke Screens icon opens them).
+                           A rerun keeps the mode in use. Switch later: kidnyce-karaoke mode
+  --desktop-autostart on|off  Desktop mode: open the screens at desktop login. Also in Settings.
   --force-hdmi             Keep both HDMI outputs on even if a TV is off at boot (edits cmdline.txt)
   --no-firewall            Do not install the nftables firewall
   --no-ddns                Do not keep the DNS record pointed at this Pi
@@ -151,6 +160,8 @@ while [[ $# -gt 0 ]]; do
         --swap-screens) SWAP_SCREENS=1 ;;
         --display-mode) DISPLAY_MODE=$2; shift ;;
         --audio) AUDIO_OUT=$2; AUDIO_SET=1; shift ;;
+        --boot) BOOT_MODE=$2; BOOT_SET=1; shift ;;
+        --desktop-autostart) DESKTOP_AUTOSTART=$2; shift ;;
         --force-hdmi) FORCE_HDMI=1 ;;
         --no-firewall) FIREWALL=0 ;;
         --no-ddns) DDNS=0 ;;
@@ -248,6 +259,8 @@ preflight() {
     [[ $DISPLAY_MODE =~ ^[0-9]+x[0-9]+$ ]] || die "--display-mode must look like 1920x1080"
     [[ $KIOSK_USER =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "invalid --kiosk-user"
     [[ -z $SCREENS || $SCREENS =~ ^(auto|single|dual)$ ]] || die "--screens must be auto, single or dual"
+    [[ $BOOT_MODE =~ ^(karaoke|desktop)$ ]] || die "--boot must be karaoke or desktop"
+    [[ -z $DESKTOP_AUTOSTART || $DESKTOP_AUTOSTART =~ ^(on|off)$ ]] || die "--desktop-autostart must be on or off"
 
     # shellcheck source=/dev/null
     source /etc/os-release
@@ -718,6 +731,19 @@ configure_kiosk() {
         kept=$(sed -n 's/^AUDIO_OUT=//p' "$ETC_DIR/kiosk.env")
         [[ -n $kept ]] && AUDIO_OUT=$kept
     fi
+    # A rerun keeps the boot mode in use (kidnyce-karaoke mode) unless --boot is given.
+    if ((!BOOT_SET)); then
+        if grep -q '^BOOT_MODE=desktop' "$ETC_DIR/kiosk.env" 2>/dev/null ||
+            [[ -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf.off ]]; then
+            BOOT_MODE=desktop
+        fi
+    fi
+    local dm
+    dm=$(find_display_manager)
+    if [[ $BOOT_MODE == desktop && -z $dm ]]; then
+        warn "--boot desktop needs Raspberry Pi OS with desktop. This one has none, so the Pi boots to the screens."
+        BOOT_MODE=karaoke
+    fi
     write_file 644 root:root "$ETC_DIR/kiosk.env" <<EOF
 # Written by deploy/install-pi.sh. Change and run: sudo kidnyce-karaoke restart screens
 # One screen or two, which port, and swapping them: Settings, Screens, or
@@ -727,20 +753,34 @@ DISPLAY_MODE=$DISPLAY_MODE
 # hdmi-singer (the singer screen, or the one screen), hdmi-crowd, headphones
 # (3.5 mm jack to your mixer), usb, pulse, or an ALSA PCM
 AUDIO_OUT=$AUDIO_OUT
+# karaoke: boot straight to the screens. desktop: keep the desktop and open the
+# screens from the Karaoke Screens icon. Switch with: sudo kidnyce-karaoke mode
+BOOT_MODE=$BOOT_MODE
 EOF
-    render "$SCRIPT_DIR/files/kiosk-autologin.conf" | write_file 644 root:root /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
-    # Undo desktop mode (kidnyce-karaoke mode desktop) left from before this run.
-    run rm -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf.off
+    install_launchers
 
-    # The screens need the console, not a desktop session.
-    if has_systemd && systemctl is-enabled display-manager.service >/dev/null 2>&1; then
-        warn "a desktop login (display manager) is enabled. The karaoke screens replace it."
-        if confirm "Switch this Pi to boot to the karaoke screens instead of the desktop?"; then
-            systemctl_do disable display-manager.service
-            systemctl_do set-default multi-user.target
-        else
-            warn "desktop left enabled; the screens will not start until it is disabled"
+    local dropin=/etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
+    if [[ $BOOT_MODE == karaoke ]]; then
+        render "$SCRIPT_DIR/files/kiosk-autologin.conf" | write_file 644 root:root "$dropin"
+        run rm -f "$dropin.off"
+        # The screens need the console, not a desktop session.
+        if [[ -n $dm ]] && systemctl is-enabled "$dm.service" >/dev/null 2>&1; then
+            warn "a desktop login ($dm) is enabled. The karaoke screens replace it."
+            if confirm "Boot to the karaoke screens instead of the desktop? (No keeps the desktop, with a Karaoke Screens icon)"; then
+                systemctl_do disable "$dm.service"
+                systemctl_do set-default multi-user.target
+            else
+                BOOT_MODE=desktop
+                run sed -i 's/^BOOT_MODE=.*/BOOT_MODE=desktop/' "$ETC_DIR/kiosk.env"
+            fi
         fi
+    fi
+    if [[ $BOOT_MODE == desktop ]]; then
+        # The desktop keeps tty1 and its login screen. The app still starts at boot.
+        run rm -f "$dropin" "$dropin.off"
+        systemctl_do enable --force "$dm.service"
+        systemctl_do set-default graphical.target
+        ok "boot: desktop ($dm), with Karaoke Screens on the desktop and in the menu"
     fi
 
     if ((FORCE_HDMI)); then
@@ -753,6 +793,48 @@ EOF
         fi
     fi
     ok "screens: ${SCREENS:-auto}, audio: $AUDIO_OUT"
+}
+
+# The login screen of a desktop install. The installer disables it in karaoke
+# mode, which removes the display-manager.service alias, so look for the units.
+find_display_manager() {
+    local unit
+    has_systemd || return 0
+    for unit in lightdm gdm3 gdm sddm greetd; do
+        if systemctl cat "$unit.service" >/dev/null 2>&1; then
+            echo "$unit"
+            return 0
+        fi
+    done
+}
+
+# Menu entries, desktop icons and the login autostart. They do nothing until
+# someone uses a desktop, so every install gets them.
+install_launchers() {
+    local name group
+    run install -D -m 644 "$SCRIPT_DIR/desktop/kidnyce-karaoke.png" /usr/share/icons/hicolor/256x256/apps/kidnyce-karaoke.png
+    run install -d -m 755 /usr/share/applications /etc/xdg/autostart
+    for name in screens stop host; do
+        render "$SCRIPT_DIR/desktop/kidnyce-karaoke-$name.desktop" |
+            write_file 644 root:root "/usr/share/applications/kidnyce-karaoke-$name.desktop"
+    done
+    render "$SCRIPT_DIR/desktop/kidnyce-karaoke-autostart.desktop" |
+        write_file 644 root:root /etc/xdg/autostart/kidnyce-karaoke-screens.desktop
+    if command -v gtk-update-icon-cache >/dev/null; then
+        run gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true
+    fi
+    # Icons on the desktop of whoever ran the installer.
+    local user=${SUDO_USER:-} home
+    [[ -n $user && $user != root ]] && id "$user" >/dev/null 2>&1 || return 0
+    home=$(getent passwd "$user" | cut -d: -f6)
+    group=$(id -gn "$user")
+    [[ -d $home ]] || return 0
+    run install -d -m 755 -o "$user" -g "$group" "$home/Desktop"
+    for name in screens host; do
+        render "$SCRIPT_DIR/desktop/kidnyce-karaoke-$name.desktop" |
+            write_file 755 "$user:$group" "$home/Desktop/kidnyce-karaoke-$name.desktop"
+    done
+    info "Karaoke Screens and Karaoke Host are on $user's desktop and in the menu (Sound & Video)"
 }
 
 # ---------------------------------------------------------------- 11. timers
@@ -796,10 +878,12 @@ start_services() {
     else
         die "Nginx is not serving https://$DOMAIN. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
     fi
-    if ((KIOSK)); then
+    if ((KIOSK)) && [[ $BOOT_MODE == karaoke ]]; then
         systemctl daemon-reload
         systemctl restart getty@tty1.service
         ok "screens starting on the HDMI outputs"
+    elif ((KIOSK)); then
+        ok "desktop mode: double click Karaoke Screens on the desktop to open the screens"
     fi
 }
 
@@ -807,7 +891,7 @@ start_services() {
 # the app once it runs. Only flags given on this run are applied; Settings
 # keeps everything else.
 apply_screen_choice() {
-    [[ -n $SCREENS || $SWAP_SCREENS == 1 ]] || return 0
+    [[ -n $SCREENS || $SWAP_SCREENS == 1 || -n $DESKTOP_AUTOSTART ]] || return 0
     if ((DRY_RUN)) || ! curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/healthz" >/dev/null 2>&1; then
         info "app not running, so the screen setup was not applied. Later: sudo kidnyce-karaoke screens ${SCREENS:-auto}"
         return
@@ -815,6 +899,10 @@ apply_screen_choice() {
     step "Choosing the screen setup"
     if [[ -n $SCREENS ]]; then /usr/local/bin/kidnyce-karaoke screens "$SCREENS" >/dev/null; fi
     if ((SWAP_SCREENS)); then /usr/local/bin/kidnyce-karaoke screens swap on >/dev/null; fi
+    if [[ -n $DESKTOP_AUTOSTART ]]; then
+        /usr/local/bin/kidnyce-karaoke desktop-autostart "$DESKTOP_AUTOSTART" >/dev/null
+        ok "open the screens at desktop login: $DESKTOP_AUTOSTART"
+    fi
     ok "screens: ${SCREENS:-as before}$( ((SWAP_SCREENS)) && echo ", singer and room swapped")"
 }
 
@@ -835,6 +923,13 @@ summary() {
     echo "  Songs folder:  $DATA_DIR/songs"
     echo "  Break music:   $DATA_DIR/music"
     echo "  Control:       kidnyce-karaoke status | doctor | code | new-code | logs"
+    if ((KIOSK)); then
+        if [[ $BOOT_MODE == desktop ]]; then
+            echo "  Boot:          desktop. Karaoke Screens icon opens the screens (sudo kidnyce-karaoke mode karaoke to change)"
+        else
+            echo "  Boot:          karaoke screens (sudo kidnyce-karaoke mode desktop to keep the desktop)"
+        fi
+    fi
     if [[ -n $FIRST_PASSWORD ]]; then
         # To the terminal only, never to the install log.
         printf '  Admin password: %s%s%s  (also: sudo kidnyce-karaoke password)\n' "$C_BOLD" "$FIRST_PASSWORD" "$C_OFF" >&3

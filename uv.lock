@@ -967,7 +967,7 @@ wheels = [
 
 [[package]]
 name = "pikaraoke"
-version = "1.23.0+kidnyce.7"
+version = "1.23.0+kidnyce.8"
 source = { editable = "." }
 dependencies = [
     { name = "babel" },

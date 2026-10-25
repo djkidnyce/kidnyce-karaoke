@@ -461,6 +461,14 @@
 					<span>{# MSG: Checkbox that swaps which TV is the singer screen. #} {% trans %}Swap the singer and room screens{% endtrans %}</span>
 					<input id="pref-swap-screens" type="checkbox" class="checkbox ml-4 mr-0" {% if swap_screens == True %}checked{% endif %}>
 				</label>
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>
+						{# MSG: Checkbox for desktop mode: open the karaoke screens when the Pi's desktop starts. #} {% trans %}Desktop mode: open the screens when the desktop starts{% endtrans %}
+						{# MSG: Help under the desktop mode checkbox. #}
+						<br><span class="is-size-7 has-text-grey-light">{% trans %}Without this, use the Karaoke Screens icon on the desktop. Alt+F4 closes them.{% endtrans %}</span>
+					</span>
+					<input id="pref-desktop-screens-on-login" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="desktop_screens_on_login" {% if desktop_screens_on_login == True %}checked{% endif %}>
+				</label>
 				<div class="panel-block px-5 py-3 is-block">
 					<table id="screens-ports" class="table is-narrow is-fullwidth is-size-7 mb-2">
 						<thead>
