@@ -25,6 +25,7 @@ for unit in "${units[@]}"; do
     rm -f "/etc/systemd/system/$unit"
 done
 rm -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf
+rm -rf /etc/systemd/system/kidnyce-karaoke.service.d
 rm -f /etc/systemd/system/certbot.service.d/kidnyce-ca.conf
 systemctl daemon-reload
 nft delete table inet kidnyce_fw 2>/dev/null || true

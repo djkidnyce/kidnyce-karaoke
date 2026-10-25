@@ -325,6 +325,18 @@ cmd_doctor() {
         if [[ $throttled == 0x0 ]]; then ok "power and temperature fine ($(vcgencmd measure_temp | cut -d= -f2))"; else warn "throttled=$throttled: weak power supply or overheating. Use the official 5V 3A supply."; fi
     fi
 
+    # The kernel slows the whole app, the song playing included, each time it
+    # reaches its soft memory cap. Downloads are what push it there.
+    local events=/sys/fs/cgroup/system.slice/kidnyce-karaoke.service/memory.events high
+    if [[ -r $events ]]; then
+        high=$(awk '$1 == "high" {print $2}' "$events")
+        if [[ ${high:-0} == 0 ]]; then
+            ok "app memory never reached its soft cap ($(systemctl show -P MemoryHigh kidnyce-karaoke 2>/dev/null | awk '{printf "%d MB", $1 / 1048576}'))"
+        else
+            warn "app memory hit its soft cap $high times since it started, which can freeze the song playing. Rerun the installer to size the cap to this board."
+        fi
+    fi
+
     if [[ ${KIOSK:-0} == 1 ]]; then
         local role up=() owner=(-u "$KIOSK_USER")
         if [[ ! -f /etc/systemd/system/getty@tty1.service.d/kidnyce-autologin.conf ]]; then

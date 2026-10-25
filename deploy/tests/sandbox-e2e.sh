@@ -119,6 +119,7 @@ U="https://$DOMAIN"
 
 echo "== Checks"
 check "app answers on loopback" curl -fs "http://127.0.0.1:$PORT/api/healthz"
+check "app memory budget sized to this machine" bash -c "grep -Eq '^MemoryHigh=[0-9]+M$' /etc/systemd/system/kidnyce-karaoke.service.d/memory.conf && grep -Eq '^MemoryMax=[0-9]+M$' /etc/systemd/system/kidnyce-karaoke.service.d/memory.conf"
 check "TLS chain verifies to the ACME root" curl -fs "${H[@]}" "$U/api/healthz"
 check "certificate names $DOMAIN" bash -c "openssl x509 -in '$CERT' -noout -ext subjectAltName | grep -q 'DNS:$DOMAIN'"
 check "ECDSA key" bash -c "openssl x509 -in '$CERT' -noout -text | grep -q 'id-ecPublicKey'"

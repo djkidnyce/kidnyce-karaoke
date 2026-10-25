@@ -29,7 +29,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+kidnyce.9"
+APP_VERSION="1.23.0+kidnyce.10"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -515,6 +515,7 @@ EOF
     fi
 
     render "$SCRIPT_DIR/files/kidnyce-karaoke.service" | write_file 644 root:root /etc/systemd/system/kidnyce-karaoke.service
+    write_memory_limits
 
     # Break music: start with the track bundled with PiKaraoke so breaks work
     # out of the box. Add your own files to the music folder any time.
@@ -625,6 +626,28 @@ EOF
         warn "Fix the DNS token or record, then run this installer again to get a trusted certificate."
         self_signed_cert
     fi
+}
+
+# The app, the live transcode of the current song and every YouTube download
+# (yt-dlp, Deno, ffmpeg) share one memory budget. A soft cap that is too tight
+# makes the kernel slow the whole service, the song playing included, so size
+# it to the board: half the RAM before slowing down, two thirds as the hard stop.
+# The screens' Chromium runs outside this budget.
+write_memory_limits() {
+    local total_mb high_mb max_mb
+    total_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null)
+    [[ $total_mb =~ ^[0-9]+$ ]] && ((total_mb > 0)) || total_mb=2048
+    high_mb=$((total_mb / 2))
+    max_mb=$((total_mb * 2 / 3))
+    ((high_mb < 1024)) && high_mb=1024
+    ((max_mb < 1536)) && max_mb=1536
+    write_file 644 root:root /etc/systemd/system/kidnyce-karaoke.service.d/memory.conf <<EOF
+# Written by deploy/install-pi.sh for this board's ${total_mb} MB of RAM.
+[Service]
+MemoryHigh=${high_mb}M
+MemoryMax=${max_mb}M
+EOF
+    info "app memory: slows down past ${high_mb} MB, stops at ${max_mb} MB (of ${total_mb} MB)"
 }
 
 # ---------------------------------------------------------------- 7. nginx

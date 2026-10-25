@@ -104,7 +104,8 @@ def _use_spare_capacity(process: subprocess.Popen) -> None:
             child.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
             child.ionice(psutil.IOPRIO_VERYLOW)
         else:
-            child.nice(10)
+            # The lowest priority: the song playing must never wait for a download.
+            child.nice(19)
             # macOS has no ionice at all, hence AttributeError below.
             child.ionice(psutil.IOPRIO_CLASS_IDLE)
     except (psutil.Error, AttributeError, NotImplementedError, OSError) as e:
