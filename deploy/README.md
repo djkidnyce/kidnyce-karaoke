@@ -358,46 +358,140 @@ add `karaoke.kidnyce.com` pointing at it. Guests join your SSID and scan.
 
 ## Preview: guests on cellular data (Cloudflare Tunnel)
 
-Off unless you turn it on. It fixes both venue problems above, and lets guests join
-without touching the venue WiFi at all.
+Off unless you turn it on. With it, guests join from cellular data or any WiFi, and
+the venue's router no longer matters: client isolation and DNS rebinding protection
+stop being problems.
 
-How it works: `cloudflared` on the Pi dials out to Cloudflare, and Cloudflare sends
-one internet name, such as `karaoke-test.kidnyce.com`, down that connection to the
-Pi. Nothing is opened on the venue router or the Pi's firewall, so it works behind
-any router, a phone hotspot, or carrier NAT. The Pi still needs some internet: venue
-WiFi, Ethernet, or a hotspot.
+How it works: `cloudflared` on the Pi opens an outbound connection to Cloudflare.
+Cloudflare sends one internet name, `karaoke-test.kidnyce.com`, down that connection.
+Nothing is opened on the venue router or on the Pi's firewall. The Pi still needs
+internet: venue WiFi, Ethernet, or your phone's hotspot.
 
 What stays the same: `karaoke.kidnyce.com`, its DNS record, its certificate and the QR
-code. The tunnel name is separate, so you can test it without touching what works.
+code. The tunnel uses its own name, so testing it cannot break what works.
 
-### 1. Let the token manage tunnels
+Plan on 20 minutes. Steps 1 and 2 happen once.
 
-Edit the Cloudflare API token you already use and add a permission:
-**Account, Cloudflare Tunnel, Edit**. Keep **Zone, DNS, Edit** on `kidnyce.com`.
+### Step 1. Make a Cloudflare token that can manage tunnels (browser, once)
 
-### 2. Install with a test name
+Your current token can only edit DNS. Make a new one that can also manage tunnels.
+A new token avoids any question about whether an edited token keeps its value.
+
+01. Sign in at dash.cloudflare.com.
+02. Top right, open your profile menu, then **My Profile**, then **API Tokens**.
+03. Select **Create Token**. At the bottom, next to **Custom token**, select **Get started**.
+04. **Token name**: `kidnyce karaoke pi`.
+05. **Permissions**, first row: **Zone**, **DNS**, **Edit**.
+06. Select **Add more**. Second row: **Account**, **Cloudflare Tunnel**, **Edit**.
+07. **Account Resources**: **Include**, then your account.
+08. **Zone Resources**: **Include**, **Specific zone**, `kidnyce.com`.
+09. Leave the IP filtering empty. Set a **TTL** end date if you want the token to expire,
+    and put a reminder in your calendar.
+10. Select **Continue to summary**. It should list the account with Cloudflare Tunnel
+    Edit and `kidnyce.com` with DNS Edit. Select **Create Token**.
+11. Copy the token now. Cloudflare shows it once.
+
+The names in the dashboard move around now and then. If a label differs, the two
+permissions in steps 5 and 6 are what matter.
+
+### Step 2. Put the token on the Pi (once)
+
+SSH to the Pi, or open a terminal on it, and replace the old token file:
+
+```sh
+nano ~/cloudflare.token        # paste the new token, nothing else, then Ctrl+O, Enter, Ctrl+X
+chmod 600 ~/cloudflare.token
+cat -A ~/cloudflare.token      # one line, no spaces, ending in $
+```
+
+The installer saves its own copy in `/etc/kidnyce-karaoke/cloudflare.token`, root
+only. The DNS record updates use the new token from then on as well.
+
+### Step 3. Get the preview on the Pi
+
+On the Mac, put the preview branch on GitHub (see the update message for the
+bundle commands). Then on the Pi:
+
+```sh
+cd ~/kidnyce-karaoke
+git fetch
+git checkout preview/internet-access
+git pull
+git describe --tags            # should print preview-v0.5 (or later)
+```
+
+### Step 4. Run the installer with the tunnel
 
 ```sh
 sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token \
     --tunnel karaoke-test.kidnyce.com
 ```
 
-The installer adds Cloudflare's signed apt repository and installs `cloudflared`. It
-creates a tunnel named `kidnyce-karaoke-karaoke-test` and routes only that name to
-the Pi. It adds a proxied CNAME for the name, and starts the `kidnyce-karaoke-tunnel`
-service. It refuses a name that already has other DNS records.
+What you should see, in this order:
 
-### 3. Test from a phone on cellular
+| Line | Means |
+| --- | --- |
+| `Cloudflare Tunnel for guests on cellular: https://karaoke-test.kidnyce.com` | The tunnel step started. |
+| `Cloudflare package key: ...` then `OK cloudflared 2025.x` | `cloudflared` came from Cloudflare's signed apt repository. |
+| `kidnyce-tunnel: created tunnel kidnyce-karaoke-karaoke-test (...)` | The tunnel exists in your account. |
+| `kidnyce-tunnel: karaoke-test.kidnyce.com now reaches this Pi through tunnel ...` | The DNS record and the route are in place. |
+| `Internet: https://karaoke-test.kidnyce.com` in the summary | Done. |
 
-Turn WiFi off on a phone. Open `https://karaoke-test.kidnyce.com/join`, type the join
-code from the screen, and add a song. Check `sudo kidnyce-karaoke tunnel`: it should
-say healthy with 4 connections.
+If it stops with an error instead:
 
-### 4. Put it in the QR code
+| Error | Fix |
+| --- | --- |
+| `listing tunnels failed: the token needs Account, Cloudflare Tunnel, Edit` | Step 1, row 6 is missing or the token is the old one. Redo steps 1 and 2. |
+| `zone lookup failed` | The token is wrong, has extra text, or lacks the zone. Check step 2. |
+| `already has other DNS records` | Something else uses `karaoke-test.kidnyce.com`. Pick another name, such as `--tunnel sing.kidnyce.com`. |
+| Anything about Zero Trust or an organization | Open one.dash.cloudflare.com once, pick a team name and the Free plan, then run the installer again. |
 
-Settings, Join code, "QR code works from anywhere", or
-`sudo kidnyce-karaoke join-from internet`. The QR code and the address on the room
-screen switch to the tunnel name within seconds. `join-from venue` switches back.
+### Step 5. Check it
+
+```sh
+sudo kidnyce-karaoke tunnel
+```
+
+It should print `cloudflared: active` and `Tunnel kidnyce-karaoke-karaoke-test: healthy, 4 connection(s)`. In the dashboard you can also see it under Zero Trust,
+Networks, Tunnels, and a proxied CNAME for `karaoke-test` under your zone's DNS.
+
+If it stays at 0 connections, the network is blocking UDP: run
+`sudo kidnyce-karaoke tunnel http2`.
+
+### Step 6. Test from a phone on cellular
+
+1. On a phone, turn WiFi off.
+2. Open `https://karaoke-test.kidnyce.com/join`.
+3. Type the join code from the room screen. Add a song.
+4. Try the host login on that phone: it should refuse, saying host login works on
+   the venue network only. That is on purpose.
+
+### Step 7. Put the internet address in the QR code
+
+When step 6 works: Settings, Join code, tick **QR code works from anywhere**. Or:
+
+```sh
+sudo kidnyce-karaoke join-from internet
+```
+
+The QR code and the address on the room screen switch within seconds. Phones then
+join from the QR code on WiFi or cellular. `sudo kidnyce-karaoke join-from venue`
+switches back.
+
+### Later: a nicer name
+
+When you are happy with it, move from the test name to a permanent one such as
+`sing.kidnyce.com`: run the installer with `--no-tunnel`, then again with
+`--tunnel sing.kidnyce.com`.
+
+### Turn it off
+
+```sh
+sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token --no-tunnel
+```
+
+That stops `cloudflared` and deletes the tunnel and its DNS record at Cloudflare. It
+also removes the tunnel's Nginx server and puts the QR code back on the venue name.
 
 ### Host controls stay local
 
@@ -415,21 +509,13 @@ from the internet.
 | Taking over the host controls | Refused from the tunnel: Nginx marks those requests, the app never treats them as the host. A client cannot set or clear the mark itself. |
 | Reaching the Pi directly | Nothing listens for the internet. The tunnel's Nginx server answers on 127.0.0.1:8081 only, and the Pi's public address stays hidden behind Cloudflare. |
 | The tunnel token | Root only on disk (`/etc/kidnyce-karaoke/tunnel.token`), handed to a throwaway service user by systemd. It can only run this tunnel, not edit your account. |
+| The API token | Root only on disk. It can edit DNS in `kidnyce.com` and tunnels in your account, nothing else. Give it an expiry date. |
 | Floods | Cloudflare's edge in front, plus the same Nginx rate limits as on the venue network. |
 
 ### Venue networks that block it
 
 `cloudflared` needs outbound port 7844: UDP for QUIC, TCP for HTTP/2. If a venue
 blocks UDP, run `sudo kidnyce-karaoke tunnel http2`, and `tunnel auto` to go back.
-
-### Turn it off
-
-```sh
-sudo ./deploy/install-pi.sh --domain karaoke.kidnyce.com --cf-token-file ~/cloudflare.token --no-tunnel
-```
-
-That stops `cloudflared` and deletes the tunnel and its DNS record at Cloudflare. It
-also removes the tunnel's Nginx server and puts the QR code back on the venue name.
 
 ## Preview: show the desktop when there is no network
 
@@ -449,7 +535,7 @@ only logs and the screens start anyway; use `sudo kidnyce-karaoke wifi`. In desk
 mode with "open the screens when the desktop starts" on, the screens wait for a
 network address before covering the desktop.
 
-The Pi's address shows in small print in a corner of the screens, or "No network"
+The Pi's address shows in small print at the bottom of the screens between songs, or "No network"
 when it has none. Turn it off under Settings, Splash screen.
 
 ## What the installer sets up
