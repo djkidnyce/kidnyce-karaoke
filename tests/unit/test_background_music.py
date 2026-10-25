@@ -19,6 +19,7 @@ def app():
 def karaoke():
     """A karaoke instance whose bg_music_path each test sets for itself."""
     k = MagicMock()
+    k.default_bg_music_path = None
     with patch("pikaraoke.routes.background_music.get_karaoke_instance", return_value=k):
         yield k
 
@@ -105,12 +106,12 @@ class TestBackgroundPlaylist:
 
         assert sorted(playlist) == ["/bg_music/a.mp3", "/bg_music/b.MP4"]
 
-    def test_caps_the_playlist_at_fifty_tracks(self, client, karaoke, tmp_path):
-        for i in range(60):
+    def test_caps_the_playlist_at_two_hundred_tracks(self, client, karaoke, tmp_path):
+        for i in range(260):
             (tmp_path / f"track{i}.mp3").write_text("audio", encoding="utf-8")
         karaoke.bg_music_path = str(tmp_path)
 
-        assert len(client.get("/api/bg_playlist").get_json()) == 50
+        assert len(client.get("/api/bg_playlist").get_json()) == 200
 
     # `?` is left out: Windows refuses it in a filename, so no such track exists.
     @pytest.mark.parametrize("name", ["a b&c.mp3", "café — träck.mp4", "a#b.mp3"])
@@ -146,3 +147,33 @@ class TestBackgroundMusicPathNamingOneTrack:
     def test_a_neighbour_in_the_same_folder_is_not_served(self, client, single_track):
         """Naming one track is not consent to share the rest of its folder."""
         assert client.get("/bg_music/neighbour.mp3").status_code == 404
+
+
+class TestKidnyceMusicFolder:
+    """The idle music plays the host's music folder, shuffled, not one bundled track."""
+
+    def test_subfolders_and_more_formats(self, client, karaoke, tmp_path):
+        (tmp_path / "Old School").mkdir()
+        (tmp_path / "Old School" / "a.m4a").write_text("a", encoding="utf-8")
+        (tmp_path / "b.flac").write_text("b", encoding="utf-8")
+        (tmp_path / "cover.jpg").write_text("c", encoding="utf-8")
+        (tmp_path / ".hidden.mp3").write_text("d", encoding="utf-8")
+        karaoke.bg_music_path = str(tmp_path)
+        playlist = client.get("/api/bg_playlist").get_json()
+        assert sorted(playlist) == ["/bg_music/Old%20School/a.m4a", "/bg_music/b.flac"]
+        assert client.get("/bg_music/Old%20School/a.m4a").data == b"a"
+
+    def test_only_tracks_are_served(self, client, karaoke, tmp_path):
+        (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+        karaoke.bg_music_path = str(tmp_path)
+        assert client.get("/bg_music/notes.txt").status_code == 404
+
+    def test_empty_folder_falls_back_to_the_bundled_track(self, client, karaoke, tmp_path):
+        empty = tmp_path / "music"
+        empty.mkdir()
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        (bundled / "default.mp3").write_text("d", encoding="utf-8")
+        karaoke.bg_music_path = str(empty)
+        karaoke.default_bg_music_path = str(bundled)
+        assert client.get("/api/bg_playlist").get_json() == ["/bg_music/default.mp3"]

@@ -747,6 +747,10 @@ class Karaoke:
 
     def update_now_playing_socket(self) -> None:
         """Emit now_playing state change via SocketIO."""
+        # Closing last night's session at start up announces it before break
+        # music exists; no browser is connected yet, so there is nothing to tell.
+        if not hasattr(self, "intermission"):
+            return
         if self.socketio:
             self.socketio.emit("now_playing", self.get_now_playing(), namespace="/")
 

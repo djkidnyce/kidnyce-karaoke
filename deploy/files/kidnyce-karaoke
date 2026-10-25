@@ -143,11 +143,11 @@ cmd_audio() {
     case "${1:-show}" in
         show)
             if [[ $EUID -eq 0 ]]; then
-                admin_curl --max-time 5 "$APP/api/display/hardware" | jq -r --arg install "${install:-hdmi-singer}" '
+                admin_curl --max-time 5 "$APP/api/display/hardware" | jq -r --arg install "${install:-headphones}" '
                     "Sound out: \(if .audio.output == "" then "install default (\($install))" else .audio.output end)",
                     "Device volume: \(if .audio.level < 0 then "left as set on the Pi" else "\(.audio.level)%" end)"'
             else
-                echo "Install default: ${install:-hdmi-singer} (run with sudo to see the app setting)"
+                echo "Install default: ${install:-headphones} (run with sudo to see the app setting)"
             fi
             echo "Sound devices:"
             aplay -l 2>/dev/null | awk '/^card/ {print "  " $0}'
@@ -172,7 +172,7 @@ cmd_audio() {
             ;;
         reset)
             set_pref audio_output ""
-            echo "Sound back to the install default (${install:-hdmi-singer}). The screens restart in a few seconds."
+            echo "Sound back to the install default (${install:-headphones}). The screens restart in a few seconds."
             ;;
         hdmi-singer | hdmi-crowd | headphones | usb | default | *:*)
             # A bare word like "card" would leave the player silent, so only

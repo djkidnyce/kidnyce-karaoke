@@ -40,7 +40,7 @@ CONFIG=${KIDNYCE_KIOSK_CONFIG:-/etc/kidnyce-karaoke/kiosk.env}
 
 APP_URL=${APP_URL:-http://127.0.0.1:5555}
 DISPLAY_MODE=${DISPLAY_MODE:-1920x1080}
-AUDIO_OUT=${AUDIO_OUT:-hdmi-singer}
+AUDIO_OUT=${AUDIO_OUT:-headphones}
 POLL_SECONDS=${POLL_SECONDS:-5}
 PROFILE_ROOT=${PROFILE_ROOT:-$HOME/.config/kidnyce-kiosk}
 if ((DESKTOP || STOP)); then
@@ -280,7 +280,10 @@ apply_layout() {
     if ((DESKTOP)) && SOUND_SINK=$(pulse_sink "$device"); then
         export PULSE_SINK=$SOUND_SINK
         device="pipewire $SOUND_SINK"
-    elif ((DESKTOP)) && [[ $device == default ]]; then
+    elif ((DESKTOP)); then
+        # PipeWire holds the sound cards on a desktop, so opening one directly
+        # would play nothing. The desktop's own output is the safe choice.
+        [[ $device != default ]] && log "no PipeWire output found for $device (is pactl installed?), using the desktop's sound output"
         device="the desktop's sound output"
     elif [[ $device != pulse ]]; then
         audio_flags=(--alsa-output-device="$device")

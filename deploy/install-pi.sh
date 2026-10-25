@@ -29,7 +29,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+kidnyce.8"
+APP_VERSION="1.23.0+kidnyce.9"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -58,7 +58,7 @@ KIOSK_USER="kiosk"
 SCREENS=""
 SWAP_SCREENS=0
 DISPLAY_MODE="1920x1080"
-AUDIO_OUT="hdmi-singer"
+AUDIO_OUT="headphones"
 AUDIO_SET=0
 BOOT_MODE="karaoke"
 BOOT_SET=0
@@ -121,7 +121,7 @@ Options:
                            single (one screen for everything) or dual. Also in Settings.
   --swap-screens           Singer screen on HDMI1 and room screen on HDMI0
   --display-mode WxH       Resolution for the screens (default: $DISPLAY_MODE)
-  --audio OUT              hdmi-singer (default), hdmi-crowd, headphones, usb, pulse or an ALSA PCM
+  --audio OUT              headphones (default, the 3.5 mm jack), hdmi-singer, hdmi-crowd, usb, pulse or an ALSA PCM
   --boot MODE              karaoke (default: the Pi boots straight to the screens) or
                            desktop (keeps the desktop; a Karaoke Screens icon opens them).
                            A rerun keeps the mode in use. Switch later: kidnyce-karaoke mode
@@ -400,7 +400,8 @@ install_packages() {
         route53) pkgs+=(python3-certbot-dns-route53) ;;
     esac
     if ((KIOSK)); then
-        pkgs+=(xserver-xorg xserver-xorg-legacy xinit x11-xserver-utils alsa-utils fonts-noto-color-emoji)
+        # pulseaudio-utils gives pactl, which picks the output on a PipeWire desktop.
+        pkgs+=(xserver-xorg xserver-xorg-legacy xinit x11-xserver-utils alsa-utils pulseaudio-utils fonts-noto-color-emoji)
         if pkg_available chromium; then pkgs+=(chromium); else pkgs+=(chromium-browser); fi
     fi
     apt_install "${pkgs[@]}"
@@ -750,8 +751,8 @@ configure_kiosk() {
 # sudo kidnyce-karaoke screens. Those apply within 5 seconds, no restart.
 APP_URL=http://127.0.0.1:$PORT
 DISPLAY_MODE=$DISPLAY_MODE
-# hdmi-singer (the singer screen, or the one screen), hdmi-crowd, headphones
-# (3.5 mm jack to your mixer), usb, pulse, or an ALSA PCM
+# headphones (3.5 mm jack to your mixer, the default), hdmi-singer (the singer
+# screen, or the one screen), hdmi-crowd, usb, pulse, or an ALSA PCM
 AUDIO_OUT=$AUDIO_OUT
 # karaoke: boot straight to the screens. desktop: keep the desktop and open the
 # screens from the Karaoke Screens icon. Switch with: sudo kidnyce-karaoke mode

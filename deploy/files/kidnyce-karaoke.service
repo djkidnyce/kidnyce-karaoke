@@ -23,6 +23,7 @@ ExecStart=@@PREFIX@@/venv/bin/pikaraoke \
     --require-join-code \
     --download-path @@DATA_DIR@@/songs \
     --intermission-music-path @@DATA_DIR@@/music \
+    --bg-music-path @@DATA_DIR@@/music \
     --skip-youtubedl-upgrade \
     $PIKARAOKE_EXTRA_ARGS
 Restart=on-failure

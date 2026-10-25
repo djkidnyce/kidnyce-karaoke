@@ -76,8 +76,8 @@ settings, play history, the certificate and the admin password are kept.
 ```text
 --boot desktop            keep the Pi's desktop; open the screens from an icon (see Desktop mode)
 --desktop-autostart on    with --boot desktop: open the screens at desktop login
---audio usb               player sound to a USB audio interface (default: singer TV over HDMI)
---audio headphones        player sound to the 3.5 mm jack
+--audio usb               player sound to a USB audio interface (default: the 3.5 mm jack)
+--audio hdmi-singer       player sound through the singer TV's HDMI
 --screens single          one screen for everything even with two TVs (default: auto)
 --screens dual            two screens even on a 2 GB board
 --swap-screens            singer screen on HDMI1, room screen on HDMI0
@@ -156,7 +156,7 @@ needed.
 
 | Output | Where it plays |
 | --- | --- |
-| Install default | What `--audio` set at install. Out of the box that is the singer TV. |
+| Install default | What `--audio` set at install. Out of the box that is the 3.5 mm headphone jack. |
 | Singer TV (HDMI) | The TV showing the singer screen, or the one screen. |
 | Room TV (HDMI) | The TV showing the room screen. |
 | Headphone jack (3.5 mm) | The Pi's analog jack. Use this for a mixer or powered speakers. |
@@ -210,6 +210,11 @@ page.
 Drop songs into `/var/lib/kidnyce-karaoke/songs` and break music into
 `/var/lib/kidnyce-karaoke/music` over SFTP. Your login was added to the group that owns
 both folders (log out and in once). Then Settings, "Rescan" under Intermission.
+
+The music folder feeds both the break music and the music that plays while the
+screens sit idle between songs. Both play it shuffled, subfolders included (MP3, M4A,
+AAC, OGG, Opus, WAV, FLAC, MP4). While the folder is empty, the idle screen plays the
+one bundled track.
 
 ## Commands
 
