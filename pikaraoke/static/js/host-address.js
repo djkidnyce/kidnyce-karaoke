@@ -22,6 +22,17 @@
     return;
   }
 
+  // Out of the way while a song plays: the lyrics own the screen then.
+  const songPlaying = () =>
+    ["video", "crowd-video"].some((id) => {
+      const v = document.getElementById(id);
+      return v && !v.paused && !v.ended && v.currentTime > 0;
+    });
+  let lastText = "";
+  const show = () => {
+    const el = document.getElementById("kn-host-address");
+    if (el) el.hidden = !lastText || songPlaying();
+  };
   const render = (state) => {
     let el = document.getElementById("kn-host-address");
     if (!el) {
@@ -29,10 +40,11 @@
       el.id = "kn-host-address";
       document.body.appendChild(el);
     }
-    const text = hostAddressText(state && state.host);
-    el.textContent = text;
-    el.hidden = !text;
+    lastText = hostAddressText(state && state.host);
+    el.textContent = lastText;
+    show();
   };
+  setInterval(show, 2000);
   const basePath = (window.pikaraokeConfig && window.pikaraokeConfig.basePath) || "";
   const refresh = () =>
     fetch(`${basePath}/api/display/state`, { credentials: "same-origin" })

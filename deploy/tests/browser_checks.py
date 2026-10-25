@@ -182,13 +182,20 @@ with sync_playwright() as p:
             20,
         ),
     )
-    # This Chromium cannot decode the test video, so check the countdown is wired
-    # to the player rather than watching it count.
+    # The test songs are 12 seconds long, inside the 20 second countdown, so the
+    # countdown is either hidden (not started) or shows the seconds left.
+    countdown = singer.evaluate(
+        "(() => { const e = document.getElementById('kn-end-countdown');"
+        " return e ? {hidden: e.hidden, text: e.textContent} : null; })()"
+    )
     check(
-        "singer screen has the end of song countdown, hidden for now",
-        singer.evaluate(
-            "(() => { const e = document.getElementById('kn-end-countdown'); return !!e && e.hidden; })()"
+        "singer screen has the end of song countdown",
+        countdown is not None
+        and (
+            countdown["hidden"]
+            or (countdown["text"].isdigit() and 1 <= int(countdown["text"]) <= 20)
         ),
+        str(countdown),
     )
     check(
         "the room screen has no countdown",

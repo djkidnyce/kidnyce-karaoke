@@ -659,7 +659,8 @@ td {
 /* Kid Nyce: the host address in small print on the screens (host-address.js). */
 #kn-host-address {
   position: fixed;
-  right: 0.6vw;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 0.4vh;
   z-index: 50;
   font-size: max(11px, 0.7vw);
