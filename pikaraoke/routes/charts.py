@@ -62,17 +62,54 @@ def most_requested():
 def number_ones():
     """Hot 100 number ones, newest first. Filter with decade=1990 or q=text."""
     k = get_karaoke_instance()
-    return jsonify(
-        {
-            "last_chart": k.number_ones.last_chart,
-            "songs": k.number_ones.search(
-                decade=request.args.get("decade", type=int),
-                query=request.args.get("q") or None,
-                limit=_limit(100),
-                offset=max(0, request.args.get("offset", 0, type=int)),
-            ),
-        }
+    songs = k.number_ones.search(
+        decade=request.args.get("decade", type=int),
+        query=request.args.get("q") or None,
+        limit=_limit(100),
+        offset=max(0, request.args.get("offset", 0, type=int)),
     )
+    for song, here in zip(songs, k.library_prep.in_library_flags(songs)):
+        song["in_library"] = here
+    return jsonify({"last_chart": k.number_ones.last_chart, "songs": songs})
+
+
+def _decade_arg() -> int | None:
+    decade = request.args.get("decade", type=int)
+    if decade is None:
+        body = request.get_json(silent=True) or {}
+        decade = body.get("decade") if isinstance(body.get("decade"), int) else None
+    return decade if decade is not None and 1950 <= decade <= 2100 and decade % 10 == 0 else None
+
+
+@charts_bp.route("/api/charts/number_ones/prep")
+def library_prep_status():
+    """Library prep progress, plus counts for ?decade=. Host only."""
+    k = get_karaoke_instance()
+    payload = {"status": k.library_prep.status.as_payload()}
+    decade = _decade_arg()
+    if decade is not None:
+        payload["preview"] = k.library_prep.preview(decade)
+    return jsonify(payload)
+
+
+@charts_bp.route("/api/charts/number_ones/prep", methods=["POST"])
+def start_library_prep():
+    """Download every number one of a decade that is not here yet. Host only."""
+    k = get_karaoke_instance()
+    decade = _decade_arg()
+    if decade is None:
+        return jsonify({"error": "Pick a decade such as 1980"}), 400
+    if not k.library_prep.start(decade):
+        return jsonify({"error": "A library prep is already running"}), 409
+    return jsonify({"status": k.library_prep.status.as_payload()})
+
+
+@charts_bp.route("/api/charts/number_ones/prep/stop", methods=["POST"])
+def stop_library_prep():
+    """Stop after the current song. Downloads already queued still finish. Host only."""
+    k = get_karaoke_instance()
+    k.library_prep.stop()
+    return jsonify({"status": k.library_prep.status.as_payload()})
 
 
 @charts_bp.route("/api/charts/number_ones/refresh", methods=["POST"])

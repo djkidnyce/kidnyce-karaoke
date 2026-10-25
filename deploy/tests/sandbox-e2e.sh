@@ -79,6 +79,10 @@ certbot delete --non-interactive --cert-name kidnyce-karaoke >/dev/null 2>&1 || 
 # Pebble also forgets ACME accounts when it restarts.
 rm -rf /etc/letsencrypt/accounts/127.0.0.1:14000
 
+# A run that stopped halfway can leave the tunnel preview behind; start clean.
+rm -f /etc/kidnyce-karaoke/tunnel.env /etc/kidnyce-karaoke/public.env /etc/kidnyce-karaoke/tunnel.token \
+    /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf /usr/local/bin/cloudflared
+
 echo "== Running the installer"
 "$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk --no-ddns \
     --dns-provider hook --dns-auth-hook "$WORK/auth-hook" --dns-cleanup-hook "$WORK/cleanup-hook" \
@@ -238,6 +242,8 @@ admin_jar="$WORK/admin"
 check "host logs in through Nginx" bash -c "jq -n --arg p '$PW' '{admin_password:\$p}' | curl -fs -c '$admin_jar' ${H[*]} -H 'Content-Type: application/json' --data-binary @- $U/api/auth | jq -e .authenticated >/dev/null"
 NEW=$(curl -fs -b "$admin_jar" "${H[@]}" -X POST "$U/api/join_code/rotate" | jq -r .code || true)
 check "host rotates the code" test -n "$NEW" -a "$NEW" != "$CODE"
+check "host sees how many 1980s number ones the library lacks" bash -c "curl -fs -b '$admin_jar' ${H[*]} '$U/api/charts/number_ones/prep?decade=1980' | jq -e '.preview.total > 0 and .preview.in_library >= 0 and .status.running == false' >/dev/null"
+check "guests cannot start a library prep" bash -c "test \"\$(curl -s -o /dev/null -w '%{http_code}' -b '$jar' ${H[*]} -X POST -H 'Content-Type: application/json' -d '{\"decade\": 1980}' $U/api/charts/number_ones/prep)\" != 200"
 check "old guest cookie is locked out" bash -c "curl -s -b '$jar' -o /dev/null -w '%{redirect_url}' ${H[*]} $U/ | grep -q '/join$'"
 check "QR now carries the new code" bash -c "curl -fs http://127.0.0.1:$PORT/api/display/state | jq -e '.join.code == \"$NEW\"' >/dev/null"
 
@@ -359,7 +365,8 @@ kidnyce-karaoke join-from internet >/dev/null
 check "join-from internet puts the tunnel name in the QR code" grep -q "^https://$THOST/join/" <<<"$(join_url)"
 kidnyce-karaoke join-from venue >/dev/null
 check "join-from venue puts it back" grep -q "^https://$DOMAIN/join/" <<<"$(join_url)"
-check "the screens get the host address" bash -c "curl -fs http://127.0.0.1:$PORT/api/display/state | jq -e '.host.show == true and .host.url == "https://$DOMAIN"' >/dev/null"
+# shellcheck disable=SC2016
+check "the screens get the host address" jq -e --arg u "https://$DOMAIN" '.host.show == true and .host.url == $u' <<<"$(curl -fs "http://127.0.0.1:$PORT/api/display/state")"
 if tunnel_install --no-tunnel >"$WORK/install-notunnel.out" 2>&1 &&
     [[ ! -e /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf && ! -e /etc/kidnyce-karaoke/tunnel.env && ! -e /etc/kidnyce-karaoke/public.env ]] &&
     curl -fs "$MOCK/state" | jq -e '.result.tunnels == [] and .result.records == []' >/dev/null; then

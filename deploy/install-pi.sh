@@ -68,6 +68,7 @@ BOOT_SET=0
 DESKTOP_AUTOSTART=""
 TUNNEL_HOSTNAME=""
 TUNNEL_OFF=0
+TUNNEL_SET=0
 TUNNEL_PORT=8081
 CF_API_BASE=""
 NET_FALLBACK=""
@@ -179,7 +180,7 @@ while [[ $# -gt 0 ]]; do
         --audio) AUDIO_OUT=$2; AUDIO_SET=1; shift ;;
         --boot) BOOT_MODE=$2; BOOT_SET=1; shift ;;
         --desktop-autostart) DESKTOP_AUTOSTART=$2; shift ;;
-        --tunnel) TUNNEL_HOSTNAME=$2; shift ;;
+        --tunnel) TUNNEL_HOSTNAME=$2; TUNNEL_SET=1; shift ;;
         --no-tunnel) TUNNEL_OFF=1 ;;
         --cf-api-base) CF_API_BASE=$2; shift ;;
         --net-fallback) NET_FALLBACK=$2; shift ;;
@@ -826,8 +827,13 @@ EOF
 PIKARAOKE_PUBLIC_ARGS=--public-url https://$TUNNEL_HOSTNAME
 EOF
     render "$SCRIPT_DIR/files/kidnyce-karaoke-tunnel.service" | write_file 644 root:root /etc/systemd/system/kidnyce-karaoke-tunnel.service
-    if ((!DRY_RUN)); then
-        /usr/local/sbin/kidnyce-karaoke-tunnel setup || die "Cloudflare Tunnel setup failed (see above). Rerun with --no-tunnel to go back."
+    if ((!DRY_RUN)) && ! /usr/local/sbin/kidnyce-karaoke-tunnel setup; then
+        # A rerun with no internet keeps the tunnel it already has.
+        if ((!TUNNEL_SET)) && [[ -s $ETC_DIR/tunnel.token ]]; then
+            warn "could not reach Cloudflare to check the tunnel; keeping the one already set up"
+        else
+            die "Cloudflare Tunnel setup failed (see above). Rerun with --no-tunnel to go back."
+        fi
     fi
     systemctl_do daemon-reload
     systemctl_do enable kidnyce-karaoke-tunnel.service
