@@ -31,6 +31,7 @@ from pikaraoke.lib.intermission import IntermissionManager, TrackLibrary
 from pikaraoke.lib.join_codes import JoinCodeManager
 from pikaraoke.lib.karaoke_database import KaraokeDatabase
 from pikaraoke.lib.keep_awake import KeepAwake
+from pikaraoke.lib.library_prep import LibraryPrep
 from pikaraoke.lib.library_scanner import LibraryScanner, ScanResult
 from pikaraoke.lib.network import get_ip
 from pikaraoke.lib.number_ones import NumberOnes
@@ -42,7 +43,11 @@ from pikaraoke.lib.request_stats import RequestStatsManager
 from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.sound_manager import SoundManager
 from pikaraoke.lib.url_prefix import append_base_path_to_url
-from pikaraoke.lib.youtube_dl import get_youtubedl_version, upgrade_youtubedl
+from pikaraoke.lib.youtube_dl import (
+    get_search_results,
+    get_youtubedl_version,
+    upgrade_youtubedl,
+)
 from pikaraoke.version import __version__ as VERSION
 
 # How often the idle run loop looks for last night's session to close.
@@ -347,6 +352,13 @@ class Karaoke:
             result = self._scanner.scan(self.download_path)
             self._apply_scan_result(result)
 
+    def _busy_for_library_prep(self) -> bool:
+        """A song playing or any download under way: library prep waits."""
+        dm = self.download_manager
+        return bool(
+            self.playback_controller.is_playing or dm.active_download or dm.pending_downloads
+        )
+
     def current_session_uuid(self) -> str | None:
         session = self.play_history.get_current_session()
         return session["uuid"] if session else None
@@ -376,6 +388,15 @@ class Karaoke:
             get_youtube_id=lambda path: self.db.get_song_identity(path)[1],
         )
         self.number_ones = NumberOnes(self.db)
+        # The download manager is built after this, so every hook reads it late.
+        self.library_prep = LibraryPrep(
+            self.number_ones,
+            library_paths=lambda: list(self.song_manager.songs),
+            known_youtube_ids=self.db.get_paths_by_youtube_ids,
+            search=get_search_results,
+            queue_download=lambda *a: self.download_manager.queue_download(*a),
+            busy=self._busy_for_library_prep,
+        )
 
         self.intermission_library = TrackLibrary(self.db, self.get_intermission_music_path)
         self.intermission = IntermissionManager(

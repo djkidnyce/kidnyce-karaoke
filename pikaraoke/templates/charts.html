@@ -7,6 +7,8 @@
 			mostRequested: {{ url_for('charts.most_requested') | tojson }},
 			numberOnes: {{ url_for('charts.number_ones') | tojson }},
 			refresh: {{ url_for('charts.refresh_number_ones') | tojson }},
+			prep: {{ url_for('charts.library_prep_status') | tojson }},
+			prepStop: {{ url_for('charts.stop_library_prep') | tojson }},
 			search: {{ url_for('search.search') | tojson }}
 		};
 		var labels = {
@@ -19,8 +21,23 @@
 			// {# MSG: Shown when nobody has requested a song yet. #}
 			noRequests: {{ _('No requests yet. Queue a song and it lands here.') | tojson }},
 			// {# MSG: Shown when a number one search finds nothing. #}
-			noMatches: {{ _('No number ones match that.') | tojson }}
+			noMatches: {{ _('No number ones match that.') | tojson }},
+			// {# MSG: Tag on a number one that is already in the song library. #}
+			inLibrary: {{ _('In library') | tojson }},
+			// {# MSG: Button that downloads a decade of number ones. {decade} is like 1980s, {missing} a number. #}
+			prepButton: {{ _('Download the {decade} number ones ({missing} not here yet)') | tojson }},
+			// {# MSG: Shown when every number one of a decade is in the library. {decade} is like 1980s. #}
+			prepAllHere: {{ _('Every {decade} number one is in the library.') | tojson }},
+			// {# MSG: Library prep progress. {done}, {total}, {queued}, {here} and {missed} are numbers. #}
+			prepProgress: {{ _('{done} of {total} checked: {queued} downloading, {here} already here, {missed} not found.') | tojson }},
+			// {# MSG: Library prep is paused while a song plays or a download runs. #}
+			prepWaiting: {{ _('Paused while a song plays or a download finishes.') | tojson }},
+			// {# MSG: Library prep finished. #}
+			prepDone: {{ _('Done. Downloads keep going in the background, one at a time.') | tojson }},
+			// {# MSG: Heading for songs library prep could not find on YouTube. #}
+			prepMissed: {{ _('Not found, try these by hand:') | tojson }}
 		};
+		var isAdmin = {{ admin | tojson }};
 		var pageSize = 100;
 		var state = { scope: {{ ('session' if has_session else 'all') | tojson }}, decade: "", q: "", offset: 0 };
 
@@ -78,6 +95,7 @@
 					$text.append($("<div class='one-meta'>").text(
 						song.artist + " · " + song.first_week.slice(0, 4) + " · " +
 						labels.weeks.replace("{count}", song.weeks)));
+					if (song.in_library) $text.append($("<span class='tag is-success is-light mt-1'>").text(labels.inLibrary));
 					$row.append($text).append(singButton(song.artist, song.song));
 					$list.append($row);
 				});
@@ -86,7 +104,55 @@
 			});
 		}
 
+		// Host only: fill the library with a decade of number ones before a gig.
+		var prepTimer = null;
+		function renderPrep(data) {
+			var st = data.status;
+			var $line = $("#prep-status");
+			if (st.running || st.total) {
+				var text = labels.prepProgress.replace("{done}", st.done).replace("{total}", st.total)
+					.replace("{queued}", st.queued).replace("{here}", st.in_library).replace("{missed}", st.missed.length);
+				if (st.running && st.waiting) text += " " + labels.prepWaiting;
+				if (!st.running) text += " " + labels.prepDone;
+				$line.text(text).show();
+			}
+			var $missed = $("#prep-missed").empty();
+			if (st.missed.length) {
+				$missed.append($("<p class='is-size-7 mt-2'>").text(labels.prepMissed));
+				st.missed.forEach(function (name) { $missed.append($("<div class='is-size-7'>").text(name)); });
+			}
+			$("#prep-stop").toggle(st.running);
+			$("#prep-start").prop("disabled", st.running);
+			if (data.preview) {
+				var p = data.preview, missing = p.total - p.in_library, dec = p.decade + "s";
+				if (missing > 0) {
+					$("#prep-start").text(labels.prepButton.replace("{decade}", dec).replace("{missing}", missing)).show();
+				} else {
+					$("#prep-start").hide();
+					if (!st.running) $line.text(labels.prepAllHere.replace("{decade}", dec)).show();
+				}
+			}
+			clearTimeout(prepTimer);
+			if (st.running) prepTimer = setTimeout(refreshPrep, 5000);
+		}
+		function refreshPrep() {
+			if (!isAdmin) return;
+			var params = state.decade ? { decade: state.decade } : {};
+			$("#prep").toggle(Boolean(state.decade));
+			$.getJSON(urls.prep, params).done(renderPrep);
+		}
+
 		$(function () {
+			$("#prep-start").on("click", function () {
+				$.ajax({ url: urls.prep, method: "POST", contentType: "application/json",
+					data: JSON.stringify({ decade: Number(state.decade) }) })
+					.done(renderPrep).fail(function (x) {
+						showNotification((x.responseJSON && x.responseJSON.error) || window.translations.errorLabel, "is-danger");
+					});
+			});
+			$("#prep-stop").on("click", function () { $.post(urls.prepStop).done(renderPrep); });
+			$("#charts-decade").on("change", refreshPrep);
+			refreshPrep();
 			$("#scope-tabs a").on("click", function (e) {
 				e.preventDefault();
 				state.scope = $(this).data("scope");
@@ -186,6 +252,17 @@
 	</button>
 	{% endif %}
 </div>
+{% if admin %}
+<div id="prep" class="box is-shadowless mb-3" style="display: none">
+	<button id="prep-start" class="button is-link" type="button"></button>
+	{# MSG: Button that stops a library prep run. #}
+	<button id="prep-stop" class="button is-light ml-2" type="button" style="display: none">{% trans %}Stop{% endtrans %}</button>
+	{# MSG: Explains the library prep button to the host. #}
+	<p class="is-size-7 has-text-grey mt-2 mb-0">{% trans %}Finds a karaoke version of each one on YouTube and saves it to the library without queueing it. It pauses while a song plays, so run it before the gig.{% endtrans %}</p>
+	<p id="prep-status" class="is-size-7 mt-2 mb-0" style="display: none"></p>
+	<div id="prep-missed"></div>
+</div>
+{% endif %}
 <div id="number-ones-list"></div>
 <button id="more-number-ones" class="button is-fullwidth mt-3" type="button" style="display: none">
 	{# MSG: Button that loads more number one songs. #}{% trans %}Show more{% endtrans %}
