@@ -259,6 +259,26 @@ class KaraokeDatabase:
             ).fetchall()
         return {row[0]: row[1] for row in rows}
 
+    def get_durations(self, paths: list[str]) -> dict[str, int]:
+        """Known lengths in seconds for these files; files never probed are left out."""
+        if not paths:
+            return {}
+        placeholders = ",".join("?" * len(paths))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT file_path, duration FROM songs WHERE duration IS NOT NULL"
+                f" AND file_path IN ({placeholders})",
+                tuple(paths),
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def set_duration(self, file_path: str, seconds: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE songs SET duration = ? WHERE file_path = ?", (int(seconds), file_path)
+            )
+            self._conn.commit()
+
     # ------------------------------------------------------------------
     # Batch write operations (used by LibraryScanner)
     # ------------------------------------------------------------------

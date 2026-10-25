@@ -12,7 +12,11 @@
       // {# MSG: Label for the most requested song on the crowd screen. #}
       topTonight: {{ _('Most requested tonight') | tojson }},
       // {# MSG: Label for the most requested song of all time on the crowd screen. #}
-      topAllTime: {{ _('Most requested of all time') | tojson }}
+      topAllTime: {{ _('Most requested of all time') | tojson }},
+      // {# MSG: Room screen: time left tonight. {left} like "1h 12m". #}
+      nightLeft: {{ _('{left} left tonight') | tojson }},
+      // {# MSG: Room screen: songs in the queue that may not fit. {count} is a number. #}
+      nightLate: {{ _('{count} may not fit') | tojson }}
     }
   };
 </script>
@@ -69,6 +73,7 @@
       <div class="section-label">{% trans %}Up next{% endtrans %}</div>
       <ol id="queue-list"></ol>
       <div id="queue-more" class="queue-more"></div>
+      <div id="night-left" class="queue-more"></div>
     </section>
 
     <div id="crowd-clock" class="crowd-clock"></div>

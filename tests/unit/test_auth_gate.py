@@ -25,6 +25,7 @@ EXPECTED_PUBLIC_ENDPOINTS = {
     "info.info",
     "now_playing.now_playing",
     "queue.queue",
+    "queue_api.night",
     "queue_api.delete_download_error",
     "queue_api.enqueue_form",
     "queue_api.get_current_downloads",

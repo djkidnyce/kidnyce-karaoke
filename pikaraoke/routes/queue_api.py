@@ -8,7 +8,7 @@ from flask_smorest import Blueprint
 from marshmallow import Schema, ValidationError, fields, validates_schema
 
 from pikaraoke.lib.auth import public
-from pikaraoke.lib.current_app import broadcast_event, get_karaoke_instance
+from pikaraoke.lib.current_app import broadcast_event, get_karaoke_instance, is_admin
 
 _ = flask_babel.gettext
 
@@ -58,6 +58,17 @@ def get_queue():
     """Get the current song queue."""
     k = get_karaoke_instance()
     return jsonify(k.queue_manager.queue)
+
+
+@queue_api_bp.route("/api/night")
+@public
+def night():
+    """Time left tonight and which queued songs fit. Guests only when the host allows."""
+    k = get_karaoke_instance()
+    plan = k.night_plan()
+    if not is_admin() and not plan["show_guests"]:
+        return jsonify({"show_guests": False})
+    return jsonify(plan)
 
 
 @queue_api_bp.route("/api/queue/addrandom/<int:amount>", methods=["POST"])

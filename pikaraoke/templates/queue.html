@@ -1,5 +1,30 @@
 {% extends 'base.html' %} {% block scripts %}
 <script src="{{ url_for('static', filename='sortable-1.15.7.min.js') }}"></script>
+<script>
+  window.nightConfig = {
+    url: {{ url_for('queue_api.night') | tojson }},
+    isAdmin: {{ admin | tojson }},
+    t: {
+      // {# MSG: Queue page, host view. {end} is a clock time, {left} like "1h 12m", {queueEnd} a clock time. #}
+      host: {{ _('Night ends {end}: {left} left. The queue runs to {queueEnd}.') | tojson }},
+      // {# MSG: Queue page, host view with no end time set. {length} like "1h 20m", {queueEnd} a clock time. #}
+      hostNoEnd: {{ _('The queue runs about {length}, to {queueEnd}. Set when the night ends in Settings, Queue to see what fits.') | tojson }},
+      // {# MSG: Queue page, guest view. {left} like "1h 12m". #}
+      guest: {{ _('{left} left tonight.') | tojson }},
+      // {# MSG: Queue page: how many songs may not fit. {count} is a number. #}
+      late: {{ _('{count} songs may not fit.') | tojson }},
+      // {# MSG: Queue page: every song fits before the end. #}
+      allFit: {{ _('Every song fits.') | tojson }},
+      // {# MSG: Queue page: the night's end time has passed. #}
+      over: {{ _('The night is over.') | tojson }},
+      // {# MSG: Line in the queue before the songs that may not fit. {end} is a clock time. #}
+      cutLine: {{ _('May not fit before {end}') | tojson }},
+      // {# MSG: Some song lengths are guesses. {count} is a number. #}
+      estimated: {{ _('({count} lengths estimated)') | tojson }}
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/night.js') }}"></script>
 
 <script>
   // Pass admin status from server to JavaScript
@@ -61,6 +86,7 @@
 
         // Initialize Drag and Drop after HTML is rendered
         window.initSortable();
+        if (window.nightRefresh) window.nightRefresh();
 
         // Highlight moved row if tracked
         if (window.highlightAfterRefresh) {
@@ -606,6 +632,7 @@
 
 {% block content %}
 
+<div id="night-banner" class="notification is-light py-2 px-4 mb-3 is-size-7" hidden></div>
 <table class="table is-striped" id="auto-refresh" style="margin-bottom: 30px">
 </table>
 

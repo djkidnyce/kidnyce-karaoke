@@ -65,6 +65,8 @@ def state():
                 "url": k.guest_url(),
                 "qr_version": k.qr_version,
             },
+            # Time left tonight, only when the host shows it to guests.
+            "night": _night_for_room(k),
             # Small print on the screens, for the host on the venue network.
             "host": {
                 "show": k.preferences.get_or_default("show_host_address") is True,
@@ -79,6 +81,17 @@ def state():
             "top_requested_all_time": k.request_stats.number_one(),
         }
     )
+
+
+def _night_for_room(k) -> dict | None:
+    plan = k.night_plan()
+    if not plan["show_guests"] or plan["time_left"] is None:
+        return None
+    return {
+        "time_left": plan["time_left"],
+        "late_count": plan["late_count"],
+        "ends_at": plan["ends_at"],
+    }
 
 
 def _plan(connected: list[str]) -> Layout:

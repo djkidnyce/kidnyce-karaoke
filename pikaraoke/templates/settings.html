@@ -852,6 +852,28 @@
 					</span>
 					<input id="pref-fair-queue" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="enable_fair_queue" {% if enable_fair_queue == True %}checked{% endif %}>
 				</label>
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-night-ends-at">
+						{# MSG: Time input: when the karaoke night ends. #} {% trans %}Night ends at{% endtrans %}
+						{# MSG: Explains the night end time. #}
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}The queue page then shows the time left and which songs may not fit. Clear it for no end.{% endtrans %}</span>
+					</label>
+					<input id="pref-night-ends-at" class="user-preference-input input is-flex-shrink-0 ml-4" type="time" data-pref="night_ends_at" data-start-value="{{ night_ends_at }}" value="{{ night_ends_at }}" style="width: 8em" />
+				</div>
+				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+					<label for="pref-changeover">
+						{# MSG: Number input: seconds between one singer and the next, for the time left estimate. #} {% trans %}Changeover between singers (seconds){% endtrans %}
+					</label>
+					<input id="pref-changeover" class="user-preference-input input is-flex-shrink-0 ml-4" type="number" min="0" max="600" step="5" data-pref="changeover_seconds" data-start-value="{{ changeover_seconds }}" value="{{ changeover_seconds }}" />
+				</div>
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>
+						{# MSG: Checkbox: guests see the time left and which songs may not fit. #} {% trans %}Show guests the time left{% endtrans %}
+						{# MSG: Explains where guests see the time left. #}
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}On the queue page and the room screen.{% endtrans %}</span>
+					</span>
+					<input id="pref-show-time-left" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="show_time_left_to_guests" {% if show_time_left_to_guests == True %}checked{% endif %}>
+				</label>
 			</div>
 
 			<hr class="my-0">
