@@ -50,6 +50,8 @@ else
     LOG=${KIOSK_LOG:-$HOME/kiosk.log}
 fi
 RUN_DIR=${XDG_RUNTIME_DIR:-$HOME/.cache/kidnyce-karaoke}
+# Left behind when someone closes the screens in karaoke mode (Alt+F4, Ctrl+W).
+CLOSED_MARK=${KIOSK_CLOSED_MARK:-$HOME/.cache/kidnyce-karaoke/screens-closed}
 PID_FILE=$RUN_DIR/kidnyce-karaoke-screens.pid
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
@@ -366,7 +368,7 @@ main() {
     trap 'stop_all; ((DESKTOP)) && rm -f "$PID_FILE"; exit 0' TERM INT
     ((DESKTOP)) && log "desktop run started"
 
-    local now reply plan current_plan="" current_outputs="" name dead sound_line choice level applied_level=""
+    local now reply plan current_plan="" current_outputs="" name dead closed sound_line choice level applied_level=""
     SOUND_OUT=$AUDIO_OUT SOUND_DEVICE="" SOUND_SINK=""
     while true; do
         now=$(connected_outputs)
@@ -382,10 +384,25 @@ main() {
             if [[ -n $current_plan ]]; then plan=$current_plan; else plan=$(fallback_layout "$now"); fi
             level=$applied_level
         fi
-        dead=0
+        dead=0 closed=0
         for name in "${!PIDS[@]}"; do
-            kill -0 "${PIDS[$name]}" 2>/dev/null || dead=1
+            if ! kill -0 "${PIDS[$name]}" 2>/dev/null; then
+                dead=1
+                # Alt+F4 or Ctrl+W ends Chromium with status 0; a crash or a
+                # kill does not. Only the first means someone closed it.
+                wait "${PIDS[$name]}" 2>/dev/null && closed=1
+            fi
         done
+        # Karaoke mode: someone closed a screen on purpose. Stop, and let the
+        # console offer the way back (kiosk/screens-closed.sh), instead of
+        # bringing the browser straight back as after a crash.
+        if ((!DESKTOP && closed)); then
+            log "a screen was closed with the keyboard: closing the karaoke screens"
+            stop_all
+            mkdir -p "${CLOSED_MARK%/*}"
+            : >"$CLOSED_MARK"
+            exit 0
+        fi
         # On a desktop, closing a screen means done: back to the desktop.
         if ((DESKTOP && dead)); then
             log "a screen was closed: closing the karaoke screens"

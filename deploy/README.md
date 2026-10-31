@@ -112,7 +112,7 @@ desktop of the user who ran the installer:
 | --- | --- |
 | Karaoke Screens | Opens the singer and room screens full screen, the same layout as Settings, Screens. A second click does nothing while they are open. |
 | Karaoke Host | Opens `https://karaoke.kidnyce.com` in the browser, for the host page and Settings. |
-| Close Karaoke Screens | Closes the screens. Alt+F4 on either screen does the same. |
+| Close Karaoke Screens | Closes the screens. Ctrl+W or Alt+F4 on either screen does the same. |
 
 To open the screens at desktop login without clicking, tick Settings, Screens,
 "Desktop mode: open the screens when the desktop starts", or run
@@ -123,6 +123,24 @@ Configuration instead of setting it themselves. Sound plays through the desktop'
 audio (PipeWire), on the output picked in Settings, Sound, and the device volume
 there sets that output's volume. Turn off screen blanking in Raspberry Pi
 Configuration, Display, so the TVs stay on during a long song.
+
+## Getting out of the screens
+
+Plug a keyboard into the Pi and press **Ctrl+W** (or **Alt+F4**) on either screen.
+Both work with no mouse and no window manager. F4 on its own does nothing.
+
+In karaoke mode the TV then shows a short menu instead of the screens:
+
+| Key | Does |
+| --- | --- |
+| Enter | Starts the screens again. They also come back on their own after 10 minutes. |
+| W | Joins a WiFi network (the same menu as `sudo kidnyce-karaoke wifi`). |
+| D | Shows the Raspberry Pi desktop until the next reboot. It asks for the admin password first, and root checks it against the app, since the screens log in with no password. Raspberry Pi OS with desktop only. |
+
+The menu also shows the Pi's address. A crash is different: the screens come back on
+their own within seconds, as before.
+
+In desktop mode the same keys close the screens and you are back on the desktop.
 
 ## Screens: one or two
 
@@ -218,10 +236,10 @@ one bundled track.
 
 ## Releases
 
-Each update comes numbered: `main v0.7` is the tested release, `preview v0.5` the
+Each update comes numbered: `main v0.8` is the tested release, `preview v0.7` the
 next features to try. `kidnyce-karaoke status` prints which one is installed, and
 `git describe --tags` in the clone says which one you have checked out. The app
-version carries the same number: `1.23.0+main.0.7`.
+version carries the same number: `1.23.0+main.0.8`.
 
 ## Commands
 

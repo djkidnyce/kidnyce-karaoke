@@ -170,7 +170,8 @@ fi
 check "room browser is muted" pgrep -f 'kidnyce-kiosk/crowd.*--mute-audio'
 DISPLAY=:91 import -window root "$WORK/two-screens.png" 2>/dev/null
 
-kill "$(pgrep -f 'kidnyce-kiosk/crowd' -o)" 2>/dev/null
+# A crash, not a keyboard close: Chromium ends a SIGTERM cleanly, like Ctrl+W.
+kill -9 "$(pgrep -f 'kidnyce-kiosk/crowd' -o)" 2>/dev/null
 check "a crashed browser is relaunched" wait_log "started crowd screen" 2
 
 status=$("$CLI" screens)
@@ -229,6 +230,17 @@ wait_log "started all screen"
 sleep 2
 check "one TV shows everything" grep -F "started all screen at 1920x1080+0+0: $APP/splash?all=1" "$WORK/kiosk.log"
 check "no room screen without a second TV" test "$(started crowd)" -eq 0
+
+echo "== Someone closes the screens with the keyboard"
+rm -f "$WORK/home/.cache/kidnyce-karaoke/screens-closed"
+win=$(DISPLAY=:92 xdotool search --onlyvisible --name 'PiKaraoke' | head -n 1)
+DISPLAY=:92 xdotool windowfocus "$win" 2>/dev/null
+DISPLAY=:92 xdotool key --clearmodifiers ctrl+w
+check "the session stops instead of bringing the browser back" wait_log "closed with the keyboard"
+sleep 2
+check "the session ended" bash -c "! kill -0 $S_PID 2>/dev/null"
+check "it leaves the mark the console menu looks for" test -f "$WORK/home/.cache/kidnyce-karaoke/screens-closed"
+check "no screen was relaunched" test "$(started all)" -eq 1
 stop_all
 
 echo "== Desktop mode: the desktop owns the monitors"

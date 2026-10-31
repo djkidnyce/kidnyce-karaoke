@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Karaoke Screens
-Comment=Open the singer and room screens full screen. Alt+F4 closes them.
+Comment=Open the singer and room screens full screen. Ctrl+W or Alt+F4 closes them.
 Exec=@@PREFIX@@/kiosk/kiosk-session.sh --desktop
 Icon=kidnyce-karaoke
 Terminal=false

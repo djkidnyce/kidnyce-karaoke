@@ -19,7 +19,8 @@ if [[ -f $ETC_DIR/install.env ]]; then
 fi
 
 units=(kidnyce-karaoke.service kidnyce-karaoke-ddns.timer kidnyce-karaoke-ddns.service
-    kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service)
+    kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service
+    kidnyce-karaoke-desktop-now.path kidnyce-karaoke-desktop-now.service)
 for unit in "${units[@]}"; do
     systemctl disable --now "$unit" 2>/dev/null || true
     rm -f "/etc/systemd/system/$unit"
@@ -43,6 +44,8 @@ rm -f /usr/share/applications/kidnyce-karaoke-{screens,stop,host}.desktop \
     /usr/share/icons/hicolor/256x256/apps/kidnyce-karaoke.png /home/*/Desktop/kidnyce-karaoke-*.desktop
 pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
+rm -f /etc/tmpfiles.d/kidnyce-karaoke.conf /usr/local/sbin/kidnyce-karaoke-desktop-now
+rm -rf /run/kidnyce-karaoke
 rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns
 rm -rf "$PREFIX" /var/lib/kidnyce-karaoke-ddns
 

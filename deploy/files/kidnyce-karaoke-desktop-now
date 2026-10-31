@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Shows the Raspberry Pi desktop until the next reboot, when the kiosk console
+# asks for it (kiosk/screens-closed.sh, key D). Run by root from
+# kidnyce-karaoke-desktop-now.path when the request file appears.
+#
+# The kiosk user logs in with no password, so the request alone proves
+# nothing: it must carry the app's admin password, checked here against the
+# app itself. The boot mode does not change; a reboot brings the screens back.
+set -uo pipefail
+
+ETC_DIR=${ETC_DIR:-/etc/kidnyce-karaoke}
+REQUEST_DIR=${REQUEST_DIR:-/run/kidnyce-karaoke}
+KIOSK_USER=${KIOSK_USER:-kiosk}
+PORT=${PORT:-5555}
+if [[ -f $ETC_DIR/install.env ]]; then
+    # shellcheck source=/dev/null
+    source "$ETC_DIR/install.env"
+fi
+APP=${APP:-http://127.0.0.1:$PORT}
+REQUEST=$REQUEST_DIR/desktop-request
+RESULT=$REQUEST_DIR/desktop-result
+
+log() { printf '%s\n' "kidnyce-desktop-now: $*" >&2; }
+
+answer() {
+    printf '%s\n' "$1" >"$RESULT.new" && chmod 644 "$RESULT.new" && mv -f "$RESULT.new" "$RESULT"
+}
+
+display_manager() {
+    local unit
+    for unit in lightdm gdm3 gdm sddm greetd; do
+        if systemctl cat "$unit.service" >/dev/null 2>&1; then
+            echo "$unit"
+            return 0
+        fi
+    done
+    return 1
+}
+
+main() {
+    # Only a plain file the kiosk user made, never a link to something else.
+    if [[ ! -f $REQUEST || -L $REQUEST ]]; then
+        rm -f "$REQUEST"
+        return 0
+    fi
+    local owner password dm
+    owner=$(stat -c %U "$REQUEST")
+    password=$(head -c 512 "$REQUEST" | head -n 1)
+    rm -f "$REQUEST"
+    if [[ $owner != "$KIOSK_USER" ]]; then
+        log "ignored a request owned by $owner"
+        return 0
+    fi
+    if ! dm=$(display_manager); then
+        answer none
+        return 0
+    fi
+    # The app's own login check, with its throttle against guessing.
+    if ! jq -n --arg p "$password" '{admin_password: $p}' |
+        curl -fsS --max-time 10 -H "Content-Type: application/json" --data-binary @- "$APP/api/auth" |
+        jq -e '.authenticated == true' >/dev/null 2>&1; then
+        unset password
+        log "wrong admin password"
+        answer denied
+        return 0
+    fi
+    unset password
+    log "admin password accepted: showing the desktop until the next reboot"
+    answer ok
+    systemctl stop getty@tty1.service
+    systemctl start "$dm.service"
+}
+
+main "$@"

@@ -29,7 +29,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+main.0.7"
+APP_VERSION="1.23.0+main.0.8"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -748,6 +748,15 @@ configure_kiosk() {
     home=${home:-/home/$KIOSK_USER}
 
     run install -m 755 -o root -g root "$SCRIPT_DIR/kiosk/kiosk-session.sh" "$PREFIX/kiosk/kiosk-session.sh"
+    # Closing the screens with the keyboard (Alt+F4, Ctrl+W) lands on a console
+    # menu; its D key asks root, with the admin password, for the desktop.
+    run install -m 755 -o root -g root "$SCRIPT_DIR/kiosk/screens-closed.sh" "$PREFIX/kiosk/screens-closed.sh"
+    run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-desktop-now" /usr/local/sbin/kidnyce-karaoke-desktop-now
+    run install -m 644 "$SCRIPT_DIR/files/kidnyce-karaoke-desktop-now.path" "$SCRIPT_DIR/files/kidnyce-karaoke-desktop-now.service" /etc/systemd/system/
+    render "$SCRIPT_DIR/files/kidnyce-karaoke-tmpfiles.conf" | write_file 644 root:root /etc/tmpfiles.d/kidnyce-karaoke.conf
+    if has_systemd; then run systemd-tmpfiles --create /etc/tmpfiles.d/kidnyce-karaoke.conf; fi
+    systemctl_do daemon-reload
+    systemctl_do enable --now kidnyce-karaoke-desktop-now.path
     render "$SCRIPT_DIR/kiosk/bash_profile" | write_file 644 "$KIOSK_USER:$KIOSK_USER" "$home/.bash_profile"
     # A rerun keeps the sound output chosen earlier (kidnyce-karaoke audio) unless --audio is given.
     if ((!AUDIO_SET)) && [[ -f $ETC_DIR/kiosk.env ]]; then

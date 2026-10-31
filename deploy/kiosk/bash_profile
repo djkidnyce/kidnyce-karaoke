@@ -1,5 +1,13 @@
 # Written by deploy/install-pi.sh for the kiosk user.
-# On tty1, start the two karaoke screens. Anywhere else (SSH), a normal shell.
+# On tty1, start the karaoke screens. Anywhere else (SSH), a normal shell.
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx @@PREFIX@@/kiosk/kiosk-session.sh -- :0 vt1 -nocursor -s 0 -dpms -nolisten tcp >"$HOME/.xsession.log" 2>&1
+    closed="$HOME/.cache/kidnyce-karaoke/screens-closed"
+    while true; do
+        rm -f "$closed"
+        startx @@PREFIX@@/kiosk/kiosk-session.sh -- :0 vt1 -nocursor -s 0 -dpms -nolisten tcp >"$HOME/.xsession.log" 2>&1
+        # A crash: log out, and the autologin starts the screens again.
+        [ -f "$closed" ] || exit 0
+        # Closed with the keyboard: the console menu, then the screens again.
+        @@PREFIX@@/kiosk/screens-closed.sh
+    done
 fi

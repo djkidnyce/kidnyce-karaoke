@@ -1,0 +1,9 @@
+# Checks the admin password in a desktop request, then shows the desktop.
+# Written by deploy/install-pi.sh; started by kidnyce-karaoke-desktop-now.path.
+[Unit]
+Description=Kid Nyce Karaoke: show the desktop on request
+After=kidnyce-karaoke.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kidnyce-karaoke-desktop-now
