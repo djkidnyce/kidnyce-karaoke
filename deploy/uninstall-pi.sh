@@ -20,7 +20,14 @@ fi
 
 units=(kidnyce-karaoke.service kidnyce-karaoke-ddns.timer kidnyce-karaoke-ddns.service
     kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service
+    kidnyce-karaoke-tunnel.service kidnyce-karaoke-netfallback.service
     kidnyce-karaoke-desktop-now.path kidnyce-karaoke-desktop-now.service)
+# The tunnel and its DNS record at Cloudflare, while the token is still here.
+if [[ -f $ETC_DIR/tunnel.env && -x /usr/local/sbin/kidnyce-karaoke-tunnel ]]; then
+    systemctl stop kidnyce-karaoke-tunnel.service 2>/dev/null || true
+    /usr/local/sbin/kidnyce-karaoke-tunnel remove ||
+        echo "Could not delete the Cloudflare Tunnel; delete it in the Zero Trust dashboard."
+fi
 for unit in "${units[@]}"; do
     systemctl disable --now "$unit" 2>/dev/null || true
     rm -f "/etc/systemd/system/$unit"
@@ -47,7 +54,8 @@ pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
 rm -f /etc/tmpfiles.d/kidnyce-karaoke.conf /usr/local/sbin/kidnyce-karaoke-desktop-now
 rm -rf /run/kidnyce-karaoke
-rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns
+rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns \
+    /usr/local/sbin/kidnyce-karaoke-tunnel /usr/local/sbin/kidnyce-karaoke-netfallback
 rm -rf "$PREFIX" /var/lib/kidnyce-karaoke-ddns
 
 if ((PURGE)); then

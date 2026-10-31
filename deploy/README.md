@@ -435,7 +435,7 @@ cd ~/kidnyce-karaoke
 git fetch
 git checkout preview/internet-access
 git pull
-git describe --tags            # should print preview-v0.6 (or later)
+git describe --tags            # should print preview-v0.7 (or later)
 ```
 
 ### Step 4. Run the installer with the tunnel
