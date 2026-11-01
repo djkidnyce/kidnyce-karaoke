@@ -92,6 +92,7 @@ def settings():
         desktop_screens_on_login=k.preferences.get_or_default("desktop_screens_on_login"),
         join_via_internet=k.preferences.get_or_default("join_via_internet"),
         night_ends_at=k.preferences.get_or_default("night_ends_at"),
+        night_end_enabled=k.preferences.get_or_default("night_end_enabled"),
         end_countdown_seconds=k.preferences.get_or_default("end_countdown_seconds"),
         end_countdown_position=k.preferences.get_or_default("end_countdown_position"),
         changeover_seconds=k.preferences.get_or_default("changeover_seconds"),

@@ -336,6 +336,15 @@ with sync_playwright() as p:
         return admin_ctx.request.get(f"{SITE}/api/display/hardware").json()["audio"]
 
     admin_page.click("h3:text-is('Sound')")
+    # On a phone the device volume box used to run off the right edge.
+    admin_page.set_viewport_size({"width": 390, "height": 844})
+    box = admin_page.locator("#pref-audio-level").bounding_box()
+    check(
+        "the device volume fits on a phone screen",
+        box is not None and box["x"] + box["width"] <= 390,
+        str(box),
+    )
+    admin_page.set_viewport_size({"width": 1280, "height": 900})
     admin_page.select_option("#pref-audio-output", "headphones")
     check(
         "host picks the headphone jack in Settings, Sound",

@@ -32,7 +32,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+preview.0.8"
+APP_VERSION="1.23.0+preview.0.9"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -888,6 +888,11 @@ configure_kiosk() {
     if has_systemd; then run systemd-tmpfiles --create /etc/tmpfiles.d/kidnyce-karaoke.conf; fi
     systemctl_do daemon-reload
     systemctl_do enable --now kidnyce-karaoke-desktop-now.path
+    # alsamixer levels survive pulling the plug, not only a clean shutdown.
+    run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-alsa-save" /usr/local/sbin/kidnyce-karaoke-alsa-save
+    run install -m 644 "$SCRIPT_DIR/files/kidnyce-karaoke-alsa-save.service" "$SCRIPT_DIR/files/kidnyce-karaoke-alsa-save.timer" /etc/systemd/system/
+    systemctl_do daemon-reload
+    systemctl_do enable --now kidnyce-karaoke-alsa-save.timer
     render "$SCRIPT_DIR/kiosk/bash_profile" | write_file 644 "$KIOSK_USER:$KIOSK_USER" "$home/.bash_profile"
     # A rerun keeps the sound output chosen earlier (kidnyce-karaoke audio) unless --audio is given.
     if ((!AUDIO_SET)) && [[ -f $ETC_DIR/kiosk.env ]]; then

@@ -256,12 +256,15 @@ check "host sees how many 1980s number ones the library lacks" bash -c "curl -fs
 guest2="$WORK/guest2"
 curl -s -c "$guest2" -o /dev/null "${H[@]}" "$U/join/$NEW" || true
 curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_ends_at --data-urlencode val=23:59 "$U/api/change_preferences" >/dev/null
+check "an end time does nothing until it is turned on" bash -c "curl -fs -b '$admin_jar' ${H[*]} $U/api/night | jq -e '.ends_at == null' >/dev/null"
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_end_enabled --data-urlencode val=True "$U/api/change_preferences" >/dev/null
 check "host sees the time left tonight" bash -c "curl -fs -b '$admin_jar' ${H[*]} $U/api/night | jq -e '.ends_at == \"23:59\" and (.time_left | type) == \"number\" and (.items | type) == \"array\"' >/dev/null"
 check "guests do not, until the host allows it" bash -c "curl -fs -b '$guest2' ${H[*]} $U/api/night | jq -e '. == {show_guests: false}' >/dev/null"
 curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=show_time_left_to_guests --data-urlencode val=True "$U/api/change_preferences" >/dev/null
 check "then guests see it too" bash -c "curl -fs -b '$guest2' ${H[*]} $U/api/night | jq -e '.show_guests == true and .ends_at == \"23:59\"' >/dev/null"
 curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=show_time_left_to_guests --data-urlencode val=False "$U/api/change_preferences" >/dev/null
 curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_ends_at --data-urlencode val= "$U/api/change_preferences" >/dev/null
+curl -fs -b "$admin_jar" "${H[@]}" -X POST --data-urlencode pref=night_end_enabled --data-urlencode val=False "$U/api/change_preferences" >/dev/null
 check "guests cannot start a library prep" bash -c "test \"\$(curl -s -o /dev/null -w '%{http_code}' -b '$jar' ${H[*]} -X POST -H 'Content-Type: application/json' -d '{\"decade\": 1980}' $U/api/charts/number_ones/prep)\" != 200"
 check "old guest cookie is locked out" bash -c "curl -s -b '$jar' -o /dev/null -w '%{redirect_url}' ${H[*]} $U/ | grep -q '/join$'"
 check "QR now carries the new code" bash -c "curl -fs http://127.0.0.1:$PORT/api/display/state | jq -e '.join.code == \"$NEW\"' >/dev/null"
@@ -296,6 +299,7 @@ check "the screens get the sound choice" bash -c "curl -fs 'http://127.0.0.1:$PO
 id kndesk >/dev/null 2>&1 || useradd --create-home kndesk
 SUDO_USER=kndesk "$ROOT/deploy/install-pi.sh" --dry-run --yes --skip-hw-check --no-ddns --dns-provider selfsigned \
     --boot desktop 3>&1 >"$WORK/dry-desktop.out" 2>&1
+check "sound levels are saved every 2 minutes" bash -c "grep -qF 'kidnyce-karaoke-alsa-save.timer' '$WORK/dry-desktop.out' && grep -qF 'enable --now kidnyce-karaoke-alsa-save.timer' '$WORK/dry-desktop.out'"
 check "closing the screens has its console menu and desktop helper" bash -c "grep -qF 'kiosk/screens-closed.sh' '$WORK/dry-desktop.out' &&
     grep -qF 'kidnyce-karaoke-desktop-now.path' '$WORK/dry-desktop.out' && grep -qF 'write /etc/tmpfiles.d/kidnyce-karaoke.conf' '$WORK/dry-desktop.out'"
 check "launchers go in the menu and the login autostart" bash -c "grep -qF 'write /usr/share/applications/kidnyce-karaoke-screens.desktop' '$WORK/dry-desktop.out' &&

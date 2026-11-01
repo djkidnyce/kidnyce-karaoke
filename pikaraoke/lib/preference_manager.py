@@ -78,7 +78,8 @@ class PreferenceManager:
         "join_via_internet": False,
         # Small host address in a corner of the screens
         "show_host_address": True,
-        # When the night ends, "HH:MM" on the Pi's clock; empty for no end
+        # When the night ends, "HH:MM" on the Pi's clock, used while night_end_enabled
+        "night_end_enabled": False,
         "night_ends_at": "",
         # Seconds between one singer's song and the next, on top of the splash delay
         "changeover_seconds": 30,

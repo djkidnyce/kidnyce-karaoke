@@ -881,14 +881,31 @@
 					</span>
 					<input id="pref-fair-queue" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="enable_fair_queue" {% if enable_fair_queue == True %}checked{% endif %}>
 				</label>
-				<div class="panel-block px-5 py-3 is-justify-content-space-between">
+				<label class="panel-block px-5 py-3 is-justify-content-space-between">
+					<span>
+						{# MSG: Checkbox: the night has an end time. #} {% trans %}The night has an end time{% endtrans %}
+						{# MSG: Explains the night end checkbox. #}
+						<span class="is-block is-size-7 has-text-grey-light">{% trans %}The queue page then shows the time left and which songs may not fit.{% endtrans %}</span>
+					</span>
+					<input id="pref-night-end-enabled" type="checkbox" class="user-preference-checkbox checkbox ml-4 mr-0" data-pref="night_end_enabled" {% if night_end_enabled == True %}checked{% endif %}>
+				</label>
+				<div id="night-end-row" class="panel-block px-5 py-3 is-justify-content-space-between{% if night_end_enabled != True %} is-disabled-row{% endif %}">
 					<label for="pref-night-ends-at">
 						{# MSG: Time input: when the karaoke night ends. #} {% trans %}Night ends at{% endtrans %}
-						{# MSG: Explains the night end time. #}
-						<span class="is-block is-size-7 has-text-grey-light">{% trans %}The queue page then shows the time left and which songs may not fit. Clear it for no end.{% endtrans %}</span>
 					</label>
-					<input id="pref-night-ends-at" class="user-preference-input input is-flex-shrink-0 ml-4" type="time" data-pref="night_ends_at" data-start-value="{{ night_ends_at }}" value="{{ night_ends_at }}" style="width: 8em" />
+					<input id="pref-night-ends-at" class="user-preference-input input is-flex-shrink-0 ml-4" type="time" data-pref="night_ends_at" data-start-value="{{ night_ends_at }}" value="{{ night_ends_at or '01:00' }}" style="width: 8em" {% if night_end_enabled != True %}disabled{% endif %} />
 				</div>
+				<script>
+					// The time only counts while the box is ticked; gray it out otherwise.
+					$("#pref-night-end-enabled").on("change", function () {
+						var on = $(this).is(":checked");
+						$("#pref-night-ends-at").prop("disabled", !on);
+						$("#night-end-row").toggleClass("is-disabled-row", !on);
+						// A first tick keeps the time shown, so the night has an end at once.
+						var $t = $("#pref-night-ends-at");
+						if (on && $t.attr("data-start-value") === "") { $t.trigger("change"); }
+					});
+				</script>
 				<div class="panel-block px-5 py-3 is-justify-content-space-between">
 					<label for="pref-changeover">
 						{# MSG: Number input: seconds between one singer and the next, for the time left estimate. #} {% trans %}Changeover between singers (seconds){% endtrans %}
@@ -1297,8 +1314,12 @@
 	{% endif %}
 
 	<style>
-	input.user-preference-input {
+	input.user-preference-input,
+	#pref-audio-level {
 		width: 80px;
+	}
+	.is-disabled-row {
+		opacity: 0.45;
 	}
 	/* Mic control sizes Bulma has no helper for */
 	.mic-control-label {

@@ -310,6 +310,7 @@ def test_preference_manager_defaults_exist():
         "desktop_screens_on_login",
         "join_via_internet",
         "show_host_address",
+        "night_end_enabled",
         "night_ends_at",
         "changeover_seconds",
         "show_time_left_to_guests",

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Written by deploy/install-pi.sh. Saves the sound card levels (what alsamixer
+# sets) every few minutes, so pulling the plug keeps them. Debian normally only
+# saves at a clean shutdown; the levels come back at boot from the same file.
+# Writes only when something changed, to spare the SD card.
+set -eu
+state=${ALSA_STATE:-/var/lib/alsa/asound.state}
+tmp=${ALSA_TMP:-/run/kidnyce-karaoke-asound.state}
+alsactl store -f "$tmp" 2>/dev/null || exit 0
+if ! cmp -s "$tmp" "$state" 2>/dev/null; then
+    install -D -m 644 "$tmp" "$state"
+fi
+rm -f "$tmp"

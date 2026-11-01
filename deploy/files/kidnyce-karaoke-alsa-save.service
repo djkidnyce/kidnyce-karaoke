@@ -1,0 +1,7 @@
+# Written by deploy/install-pi.sh. Keeps the sound levels across a power cut.
+[Unit]
+Description=Kid Nyce Karaoke: save the sound card levels
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kidnyce-karaoke-alsa-save

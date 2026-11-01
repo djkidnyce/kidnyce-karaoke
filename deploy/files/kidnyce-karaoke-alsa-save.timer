@@ -1,0 +1,11 @@
+# Written by deploy/install-pi.sh.
+[Unit]
+Description=Kid Nyce Karaoke: save the sound card levels every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

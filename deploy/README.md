@@ -186,6 +186,11 @@ level the Pi already has. The player volume under Playback is separate: it scale
 song inside the browser, the device volume sets the jack or card itself. For a mixer
 input, set the device volume around 80 and ride the gain on the mixer.
 
+Levels you set in `alsamixer` also stay now. Debian only saved them at a clean
+shutdown, so pulling the plug lost them. The Pi now saves them every 2 minutes
+(only when they changed) and restores them at boot. A device volume set in
+Settings wins over `alsamixer` each time the screens start.
+
 The same from a terminal:
 
 ```text
@@ -222,7 +227,7 @@ page.
 | Arrive | Join the venue WiFi (or plug in Ethernet). The DNS record updates within 5 minutes. Run `kidnyce-karaoke doctor`. |
 | Start | Settings, Sessions: start a session named for the night. Each boot gives a new join code (Settings, Join code, or `code-on-boot off` to keep it). If you skip the session, the first song starts one and keeps the code guests already scanned. |
 | Breaks | Home page, Hosting: "Break before next singer", or turn breaks on in Settings, Intermission. |
-| Time left | Settings, Queue: "Night ends at". The queue page then shows the time left and puts a line before the songs that may not fit, counting each song's real length, the changeover between singers and break music. "Show guests the time left" puts it on their queue page and the room screen too. |
+| Time left | Settings, Queue: tick "The night has an end time" and set "Night ends at". The queue page then shows the time left and puts a line before the songs that may not fit, counting each song's real length, the changeover between singers and break music. "Show guests the time left" puts it on their queue page and the room screen too. |
 | Trouble guest | `sudo kidnyce-karaoke new-code`: every phone has to scan again. |
 | End | End the session. The code rotates, so last night's phones are locked out. |
 
@@ -443,7 +448,7 @@ cd ~/kidnyce-karaoke
 git fetch
 git checkout preview/internet-access
 git pull
-git describe --tags            # should print preview-v0.8 (or later)
+git describe --tags            # should print preview-v0.9 (or later)
 ```
 
 ### Step 4. Run the installer with the tunnel

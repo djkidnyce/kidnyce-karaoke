@@ -388,7 +388,11 @@ class Karaoke:
             playing_left += float(payload.get("remaining_seconds") or 0)
         result = night_plan.plan(
             now=now,
-            ends_at=night_plan.end_of_night(prefs.get_or_default("night_ends_at"), now),
+            ends_at=(
+                night_plan.end_of_night(prefs.get_or_default("night_ends_at"), now)
+                if prefs.get_or_default("night_end_enabled") is True
+                else None
+            ),
             queue=list(self.queue_manager.queue),
             seconds_of=self._song_seconds,
             playing_left=playing_left,
