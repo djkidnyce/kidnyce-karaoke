@@ -140,6 +140,14 @@ check "ECDSA key" bash -c "openssl x509 -in '$CERT' -noout -text | grep -q 'id-e
 check "app is not reachable on the LAN address" bash -c "! curl -fs --max-time 2 http://\$(hostname -I | awk '{print \$1}'):$PORT/api/healthz"
 check "HTTP redirects to HTTPS (308)" bash -c "curl -s -o /dev/null -w '%{http_code}' ${H[*]} http://$DOMAIN/ | grep -qx 308"
 check "unknown Host header is dropped" bash -c "! curl -sk --max-time 3 -H 'Host: evil.example' https://127.0.0.1/ -o /dev/null"
+# The Pi's own private address on the network it joined: answered, for host
+# login where the router hides the name. A public address is still dropped.
+IPH=(-sk -o /dev/null -w '%{http_code}' -H 'Host: 172.16.0.142')
+check "the Pi's private address serves the join page" test "$(curl "${IPH[@]}" https://127.0.0.1/join)" = 200
+check "plain HTTP to the address moves to HTTPS (308)" test "$(curl "${IPH[@]}" http://127.0.0.1/join)" = 308
+check "a public address as Host is dropped" bash -c "! curl -sk --max-time 3 -H 'Host: 8.8.8.8' https://127.0.0.1/join -o /dev/null"
+check "Socket.IO accepts a page opened at that address" test "$(curl "${IPH[@]}" -H 'Origin: https://172.16.0.142' 'https://127.0.0.1/socket.io/?EIO=4&transport=polling')" = 200
+check "Socket.IO refuses another site's page" test "$(curl "${IPH[@]}" -H 'Origin: https://evil.example' 'https://127.0.0.1/socket.io/?EIO=4&transport=polling')" = 400
 check "TLS 1.1 is refused" bash -c "! openssl s_client -connect 127.0.0.1:443 -servername $DOMAIN -tls1_1 </dev/null >/dev/null 2>&1"
 check "TLS 1.3 works" bash -c "openssl s_client -connect 127.0.0.1:443 -servername $DOMAIN -tls1_3 </dev/null 2>/dev/null | grep -q 'TLSv1.3'"
 
@@ -240,6 +248,7 @@ fi
 echo "== Rotation"
 PW=$(cat /etc/kidnyce-karaoke/admin-password)
 admin_jar="$WORK/admin"
+check "host logs in at the Pi's address too" bash -c "jq -n --arg p '$PW' '{admin_password:\$p}' | curl -fsk -H 'Host: 172.16.0.142' -H 'Content-Type: application/json' --data-binary @- https://127.0.0.1/api/auth | jq -e .authenticated >/dev/null"
 check "host logs in through Nginx" bash -c "jq -n --arg p '$PW' '{admin_password:\$p}' | curl -fs -c '$admin_jar' ${H[*]} -H 'Content-Type: application/json' --data-binary @- $U/api/auth | jq -e .authenticated >/dev/null"
 NEW=$(curl -fs -b "$admin_jar" "${H[@]}" -X POST "$U/api/join_code/rotate" | jq -r .code || true)
 check "host rotates the code" test -n "$NEW" -a "$NEW" != "$CODE"

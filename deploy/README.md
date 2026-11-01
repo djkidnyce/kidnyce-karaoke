@@ -369,7 +369,15 @@ Pi's private address. Two things can get in the way:
 2. **DNS rebinding protection** on some routers, which drops public names that
    resolve to private addresses. The name then fails to resolve on phones.
 
-The reliable fix for both is your own travel router (GL.iNet and similar): it joins
+For you as host there is always a way in: the Pi's own address on whatever network
+it joined, shown in small print at the bottom of the screens between songs, such as
+`https://172.16.0.142`. The browser warns once that the certificate is for
+`karaoke.kidnyce.com`, not the address; accept it and log in. Only private addresses
+work this way. When the Pi joins a network, the DNS record follows it at once
+(NetworkManager tells the DNS updater), so the name works again wherever the router
+allows it.
+
+The reliable fix for guests is your own travel router (GL.iNet and similar): it joins
 the venue WiFi or Ethernet as its uplink, gives the Pi a fixed address, and broadcasts
 your own SSID. Put a DHCP reservation on the Pi and, in the router's DNS settings,
 add `karaoke.kidnyce.com` pointing at it. Guests join your SSID and scan.
@@ -435,7 +443,7 @@ cd ~/kidnyce-karaoke
 git fetch
 git checkout preview/internet-access
 git pull
-git describe --tags            # should print preview-v0.7 (or later)
+git describe --tags            # should print preview-v0.8 (or later)
 ```
 
 ### Step 4. Run the installer with the tunnel

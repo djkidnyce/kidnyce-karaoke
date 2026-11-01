@@ -43,6 +43,28 @@ _ = flask_babel.gettext
 
 from gevent.pywsgi import WSGIServer
 
+
+def origin_check(known: list[str]):
+    """The listed origins, plus the page's own origin.
+
+    A page opened at the Pi's own address (https://172.16.0.142, from whatever
+    network it joined) is same origin with the server it talks to. Nginx only
+    passes private addresses and the karaoke names through, so another site's
+    page cannot get here by pretending.
+    """
+
+    def allowed(origin, environ=None) -> bool:
+        if origin in known:
+            return True
+        if not origin or not environ:
+            return False
+        host = environ.get("HTTP_HOST")
+        scheme = environ.get("HTTP_X_FORWARDED_PROTO", environ.get("wsgi.url_scheme", "http"))
+        return bool(host) and origin == f"{scheme.split(',')[0].strip()}://{host}"
+
+    return allowed
+
+
 args = parse_pikaraoke_args()
 socketio_path = f"{args.base_path}/socket.io" if args.base_path else "/socket.io"
 # Setting cors_allowed_origins REPLACES engineio's same-origin default, so --url alone
@@ -60,6 +82,7 @@ if args.url:
     if args.public_url:
         split_public = urlsplit(args.public_url)
         cors_allowed_origins.append(f"{split_public.scheme}://{split_public.netloc}")
+    cors_allowed_origins = origin_check(cors_allowed_origins)
 socketio = SocketIO(
     async_mode="gevent", cors_allowed_origins=cors_allowed_origins, path=socketio_path
 )

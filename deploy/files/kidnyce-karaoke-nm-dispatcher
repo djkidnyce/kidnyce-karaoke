@@ -1,0 +1,10 @@
+#!/bin/sh
+# Written by deploy/install-pi.sh. NetworkManager runs this on network changes.
+# When the Pi joins a network or gets a new address, point the karaoke name at
+# it right away instead of on the next 5 minute timer run.
+case "$2" in
+    up | dhcp4-change | connectivity-change)
+        systemctl start --no-block kidnyce-karaoke-ddns.service
+        ;;
+esac
+exit 0

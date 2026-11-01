@@ -90,3 +90,43 @@ class TestGuestUrl:
     def test_choice_ignored_without_a_tunnel(self):
         k = self.karaoke(None, True)
         assert Karaoke.guest_url(k) == "https://karaoke.kidnyce.com"
+
+
+class TestSocketOrigins:
+    """Socket.IO accepts the karaoke names and the page's own origin."""
+
+    def check(self):
+        # app.py parses arguments at import, so read the helper from its source.
+        import ast
+        import importlib
+        import pathlib
+
+        src = pathlib.Path(importlib.util.find_spec("pikaraoke").origin).parent / "app.py"
+        tree = ast.parse(src.read_text())
+        fn = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "origin_check"
+        )
+        scope: dict = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), str(src), "exec"), scope)
+        return scope["origin_check"](["https://karaoke.kidnyce.com", "http://127.0.0.1:5555"])
+
+    def test_listed_origins(self):
+        allowed = self.check()
+        assert allowed("https://karaoke.kidnyce.com", {})
+        assert allowed("http://127.0.0.1:5555", None)
+
+    def test_the_pis_own_address_on_this_network(self):
+        allowed = self.check()
+        env = {
+            "HTTP_HOST": "172.16.0.142",
+            "HTTP_X_FORWARDED_PROTO": "https",
+            "wsgi.url_scheme": "http",
+        }
+        assert allowed("https://172.16.0.142", env)
+
+    def test_another_site_is_refused(self):
+        allowed = self.check()
+        env = {"HTTP_HOST": "172.16.0.142", "HTTP_X_FORWARDED_PROTO": "https"}
+        assert not allowed("https://evil.example", env)
+        assert not allowed("http://172.16.0.142", env)
+        assert not allowed(None, env)

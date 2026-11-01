@@ -52,7 +52,8 @@ rm -f /usr/share/applications/kidnyce-karaoke-{screens,stop,host}.desktop \
     /usr/share/icons/hicolor/256x256/apps/kidnyce-karaoke.png /home/*/Desktop/kidnyce-karaoke-*.desktop
 pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
-rm -f /etc/tmpfiles.d/kidnyce-karaoke.conf /usr/local/sbin/kidnyce-karaoke-desktop-now
+rm -f /etc/tmpfiles.d/kidnyce-karaoke.conf /usr/local/sbin/kidnyce-karaoke-desktop-now \
+    /etc/NetworkManager/dispatcher.d/90-kidnyce-karaoke
 rm -rf /run/kidnyce-karaoke
 rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns \
     /usr/local/sbin/kidnyce-karaoke-tunnel /usr/local/sbin/kidnyce-karaoke-netfallback

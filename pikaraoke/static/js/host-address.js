@@ -13,8 +13,10 @@
   const hostAddressText = (host) => {
     if (!host || !host.show) return "";
     if (!host.ip) return noNetwork;
+    // The address works from any phone on this network, with https in front.
     const name = hostOf(host.url);
-    return name && name !== host.ip ? `${host.ip} · ${name}` : host.ip;
+    const address = `https://${host.ip}`;
+    return name && name !== host.ip ? `${address} · ${name}` : address;
   };
 
   if (typeof module !== "undefined" && module.exports) {

@@ -32,7 +32,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+preview.0.7"
+APP_VERSION="1.23.0+preview.0.8"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -752,6 +752,10 @@ EOF
     run install -m 644 "$SCRIPT_DIR/files/kidnyce-karaoke-ddns.timer" /etc/systemd/system/
     systemctl_do daemon-reload
     systemctl_do enable kidnyce-karaoke-ddns.timer
+    # A new network or address updates the record at once, not up to 5 minutes later.
+    if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
+        run install -m 755 -o root -g root "$SCRIPT_DIR/files/kidnyce-karaoke-nm-dispatcher" /etc/NetworkManager/dispatcher.d/90-kidnyce-karaoke
+    fi
     if ((!DRY_RUN && !NO_START)); then
         if /usr/local/sbin/kidnyce-karaoke-ddns; then
             ok "DNS record set"
