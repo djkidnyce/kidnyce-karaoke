@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html data-theme="dark">
+{# The host's look (Settings, Look). The TV screens keep their own. #}
+{% set kn_theme = ui_theme() if (ui_theme is defined and not blank_page) else none %}
+<html data-theme="{{ 'light' if kn_theme and kn_theme.light else 'dark' }}"{% if kn_theme %} data-kn-theme="{{ kn_theme.id }}"{% endif %}>
 
 <head>
   {% if title %}
@@ -15,10 +17,13 @@
   <link rel="stylesheet" href="{{  url_for('static', filename='fonts/lato/lato.css') }}">
   <link rel="stylesheet" href="{{  url_for('static', filename='bulma.min.css') }}">
   <link rel="stylesheet" href="{{  url_for('static', filename='custom.css') }}">
+  <link rel="stylesheet" href="{{  url_for('static', filename='kn-themes.css') }}">
   <link rel="icon" type="image/png" href="{{  url_for('static', filename='images/microphone.png') }}">
   <link rel="stylesheet" href="{{  url_for('static', filename='fontello/css/fontello.css') }}?v=4">
 
   <script>
+    // Which themes are light, for switching live when the host applies one.
+    window.knThemeLight = {{ ui_theme_light() | tojson if ui_theme_light is defined else '{}' }};
     window.pikaraokeConfig = {
       basePath: "{{ base_path }}",
       cookiePath: "{{ cookie_path }}",
@@ -99,6 +104,26 @@
       window.socket.on('disconnect', function() {
           console.log('Socket disconnected');
       });
+    }
+
+    // The host applied another theme: every open page follows at once. A page
+    // may have made the socket before this runs, so bind on every page load,
+    // replacing the handler a previous page left.
+    function bindThemeUpdates() {
+      if (!window.socket) {
+        return;
+      }
+      if (window.knThemeHandler) {
+        window.socket.off("preferences_update", window.knThemeHandler);
+      }
+      window.knThemeHandler = function (data) {
+        if (!data || data.key !== "ui_theme" || !document.documentElement.hasAttribute("data-kn-theme")) return;
+        var light = window.knThemeLight || {};
+        var id = Object.prototype.hasOwnProperty.call(light, data.value) ? data.value : "classic";
+        document.documentElement.setAttribute("data-kn-theme", id);
+        document.documentElement.setAttribute("data-theme", light[id] ? "light" : "dark");
+      };
+      window.socket.on("preferences_update", window.knThemeHandler);
     }
 
 
@@ -330,6 +355,7 @@
       // Unlike the singer field, the ribbon is not a KJ-mode control: everyone
       // in the room sees which session is running.
       bindSessionRibbon();
+      bindThemeUpdates();
 
       // Give server flashes the same close button and auto-expiry as fired toasts.
       $("#notification-stack .notification").each(function () {
@@ -453,6 +479,14 @@
 
   {% if not blank_page %}
   <div class="container" style="padding: 5px; max-width: 900px;">
+    {# Your logo above the navigation in every theme but Classic. #}
+    <div class="kn-brandbar">
+      <a class="kn-logo-plate" href="{{ url_for('home.home') }}">
+        <img src="{{ url_for('images.logo') }}" alt="{{ site_title }}">
+      </a>
+      {# MSG: Small tag beside the logo above the navigation. #}
+      <span class="kn-brand-tag">{% trans %}Karaoke{% endtrans %}</span>
+    </div>
     <nav class="navbar is-primary" role="navigation" aria-label="main navigation">
       <div class="navbar-brand ml-0" id="brand">
         <a id="home" class="navbar-item" href="{{ url_for('home.home') }}">

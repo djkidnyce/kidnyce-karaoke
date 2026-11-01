@@ -342,6 +342,76 @@
 		<div class="card mt-5">
 			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
 				<div>
+					{# MSG: Header of the settings section for the look of the pages on phones and computers. #}
+					<h3 class="m-0">{% trans %}Look{% endtrans %}</h3>
+					{# MSG: One-line summary under the Look heading. #}
+					<span class="section-summary is-size-7 has-text-grey-light">{% trans %}Theme for Home, Queue, Songs, Add New and the host pages{% endtrans %}</span>
+				</div>
+			</header>
+			<div class="collapsible-content panel is-shadowless mb-0">
+				<div class="panel-block px-5 py-3 is-block">
+					{# MSG: Explains the theme picker. #}
+					<p class="is-size-7 has-text-grey-light mb-3">{% trans %}Tap a theme to preview it on this page. Apply saves it for everyone, and open pages switch at once. The TV screens keep their own look.{% endtrans %}</p>
+					<div class="kn-theme-grid" role="radiogroup" aria-label="{{ _('Theme') }}">
+						{% for t in themes %}
+						<button type="button" class="kn-theme-card{% if t.id == ui_theme_id %} is-current{% endif %}" role="radio"
+							aria-checked="{{ 'true' if t.id == ui_theme_id else 'false' }}"
+							data-theme-id="{{ t.id }}" data-theme-light="{{ 'true' if t.light else 'false' }}">
+							<span class="kn-theme-sample" style="background: {{ t.swatch[0] }};">
+								<span class="kn-theme-sample-panel" style="background: {{ t.swatch[1] }};">
+									<span class="kn-theme-sample-line" style="background: {{ t.swatch[3] }};"></span>
+									<span class="kn-theme-sample-button" style="background: {{ t.swatch[2] }};"></span>
+								</span>
+							</span>
+							<span class="kn-theme-name">{{ t.name }}</span>
+							<span class="kn-theme-blurb">{{ t.blurb }}</span>
+						</button>
+						{% endfor %}
+					</div>
+					<div class="is-flex is-align-items-center mt-3 is-gap-2">
+						{# MSG: Button that saves the previewed theme for everyone. #}
+						<button id="kn-theme-apply" class="button is-primary" type="button" disabled>{% trans %}Apply{% endtrans %}</button>
+						{# MSG: Button that undoes a theme preview. #}
+						<button id="kn-theme-cancel" class="button" type="button" disabled>{% trans %}Cancel preview{% endtrans %}</button>
+					</div>
+				</div>
+			</div>
+			<script>
+				(function () {
+					var saved = {{ ui_theme_id | tojson }};
+					var picked = saved;
+					var changeUrl = "{{ url_for('preferences.change_preferences') }}";
+					function show(id, light) {
+						document.documentElement.setAttribute("data-kn-theme", id);
+						document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+						$(".kn-theme-card").each(function () {
+							var on = this.dataset.themeId === id;
+							$(this).toggleClass("is-current", on).attr("aria-checked", on ? "true" : "false");
+						});
+						$("#kn-theme-apply, #kn-theme-cancel").prop("disabled", id === saved);
+					}
+					$(".kn-theme-card").on("click", function () {
+						picked = this.dataset.themeId;
+						show(picked, this.dataset.themeLight === "true");
+					});
+					$("#kn-theme-cancel").on("click", function () {
+						var card = $(".kn-theme-card").filter(function () { return this.dataset.themeId === saved; })[0];
+						picked = saved;
+						show(saved, card && card.dataset.themeLight === "true");
+					});
+					$("#kn-theme-apply").on("click", function () {
+						$.post(changeUrl, { pref: "ui_theme", val: picked }).done(function (data) {
+							showNotification(data[1], data[0] ? "is-success" : "is-danger");
+							if (data[0]) { saved = picked; $("#kn-theme-apply, #kn-theme-cancel").prop("disabled", true); }
+						});
+					});
+				})();
+			</script>
+
+			<hr class="my-0">
+
+			<header class="card-header py-3 px-5 collapsible-header is-collapsed">
+				<div>
 					{# MSG: Header of the settings section for the screen the videos play on, usually a TV, and what it shows between songs. #}
 					<h3 class="m-0">{% trans %}Splash screen{% endtrans %}</h3>
 					{# MSG: One-line summary under the Splash screen heading, naming the controls inside it. #}

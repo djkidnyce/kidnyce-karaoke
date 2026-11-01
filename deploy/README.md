@@ -124,6 +124,16 @@ audio (PipeWire), on the output picked in Settings, Sound, and the device volume
 there sets that output's volume. Turn off screen blanking in Raspberry Pi
 Configuration, Display, so the TVs stay on during a long song.
 
+## Themes
+
+Settings, Look offers six looks for the pages on phones and computers: Classic (the
+original), Club Console, Daylight, Broadcast, Vinyl Lounge and Social Pulse. Tap one
+to preview it on the Settings page, then **Apply**: it is saved on the Pi for
+everyone, and every open page switches at once. Home, Queue, Songs, Add New and the
+host pages all follow it; the TV screens keep their own look. Every theme but
+Classic shows your logo above the navigation, on a white plate so the record and the
+grey letters stay readable on dark and light themes alike.
+
 ## Getting out of the screens
 
 Plug a keyboard into the Pi and press **Ctrl+W** (or **Alt+F4**) on either screen.
@@ -448,7 +458,7 @@ cd ~/kidnyce-karaoke
 git fetch
 git checkout preview/internet-access
 git pull
-git describe --tags            # should print preview-v0.9 (or later)
+git describe --tags            # should print preview-v0.10 (or later)
 ```
 
 ### Step 4. Run the installer with the tunnel

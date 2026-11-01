@@ -5,7 +5,7 @@ from flask import render_template
 from flask_smorest import Blueprint
 
 from pikaraoke.constants import ITUNES_COUNTRIES, LANGUAGES, per_page_options
-from pikaraoke.lib import keep_awake
+from pikaraoke.lib import keep_awake, ui_themes
 from pikaraoke.lib.auth import public
 from pikaraoke.lib.current_app import (
     get_admin_auth,
@@ -94,6 +94,8 @@ def settings():
         night_ends_at=k.preferences.get_or_default("night_ends_at"),
         night_end_enabled=k.preferences.get_or_default("night_end_enabled"),
         end_countdown_seconds=k.preferences.get_or_default("end_countdown_seconds"),
+        themes=ui_themes.THEMES,
+        ui_theme_id=ui_themes.theme(k.preferences.get_or_default("ui_theme")).id,
         end_countdown_position=k.preferences.get_or_default("end_countdown_position"),
         changeover_seconds=k.preferences.get_or_default("changeover_seconds"),
         show_time_left_to_guests=k.preferences.get_or_default("show_time_left_to_guests"),

@@ -32,7 +32,7 @@
 set -Eeuo pipefail
 
 INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+preview.0.9"
+APP_VERSION="1.23.0+preview.0.10"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.

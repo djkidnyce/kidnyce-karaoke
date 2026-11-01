@@ -1,0 +1,348 @@
+/* ===================================
+   Kid Nyce: five looks for the guest and host pages (Settings, Look).
+   Each theme sets the tokens below on <html data-kn-theme="...">; the shared
+   rules under them apply the tokens to the page shell, the navigation and the
+   Bulma pieces the pages are built from. Page logic is the same for all five.
+   "classic" sets nothing, so it stays exactly as before.
+   Not used on the TV screens, which keep their own look.
+   =================================== */
+
+html[data-kn-theme="club-console"] {
+  --t-ink: #f5f7f7; --t-muted: #aab8be; --t-bg: #101a22; --t-nav: #15232d;
+  --t-panel: #1b2b36; --t-panel2: #223641; --t-line: #334653;
+  --t-accent: #f15b49; --t-accent-ink: #fff; --t-soft: #193a42;
+  --t-font: Inter, ui-sans-serif, system-ui, sans-serif; --t-head-font: var(--t-font);
+  --t-radius: 14px; --t-control-radius: 10px;
+  --bulma-primary-h: 6deg; --bulma-primary-s: 86%; --bulma-primary-l: 62%;
+  --bulma-link-h: 6deg; --bulma-link-s: 86%; --bulma-link-l: 66%;
+  --bulma-scheme-h: 207; --bulma-scheme-s: 36%;
+}
+html[data-kn-theme="daylight"] {
+  --t-ink: #2c2827; --t-muted: #6b6560; --t-bg: #f8f4ed; --t-nav: #f8f4ed;
+  --t-panel: #fffdf9; --t-panel2: #f7ebdf; --t-line: #e6d9ca;
+  --t-accent: #c94e3c; --t-accent-ink: #fff; --t-soft: #f9e8e2;
+  --t-font: "Avenir Next", ui-sans-serif, system-ui, sans-serif; --t-head-font: Georgia, serif;
+  --t-radius: 16px; --t-control-radius: 10px;
+  --bulma-primary-h: 7deg; --bulma-primary-s: 56%; --bulma-primary-l: 51%;
+  --bulma-link-h: 7deg; --bulma-link-s: 56%; --bulma-link-l: 45%;
+  --bulma-scheme-h: 38; --bulma-scheme-s: 44%;
+}
+html[data-kn-theme="broadcast"] {
+  --t-ink: #f5f4f1; --t-muted: #a7a7a7; --t-bg: #181819; --t-nav: #242426;
+  --t-panel: #232325; --t-panel2: #29292b; --t-line: #3f3e40;
+  --t-accent: #ed5148; --t-accent-ink: #fff; --t-soft: #3a2527;
+  --t-font: ui-sans-serif, system-ui, sans-serif; --t-head-font: Impact, "Arial Narrow", "Arial Black", sans-serif;
+  --t-radius: 0; --t-control-radius: 0;
+  --bulma-primary-h: 3deg; --bulma-primary-s: 82%; --bulma-primary-l: 61%;
+  --bulma-link-h: 3deg; --bulma-link-s: 82%; --bulma-link-l: 66%;
+  --bulma-scheme-h: 240; --bulma-scheme-s: 2%;
+  --bulma-radius: 0; --bulma-radius-small: 0; --bulma-radius-large: 0;
+}
+html[data-kn-theme="vinyl-lounge"] {
+  --t-ink: #27231f; --t-muted: #6b635a; --t-bg: #eee5d8; --t-nav: #e5d8c7;
+  --t-panel: #fff9ef; --t-panel2: #efe0cf; --t-line: #d7c6b2;
+  --t-accent: #127d84; --t-accent-ink: #fff; --t-soft: #d9edeb;
+  --t-font: ui-sans-serif, system-ui, sans-serif; --t-head-font: Georgia, serif;
+  --t-radius: 14px; --t-control-radius: 8px;
+  --bulma-primary-h: 184deg; --bulma-primary-s: 76%; --bulma-primary-l: 29%;
+  --bulma-link-h: 184deg; --bulma-link-s: 76%; --bulma-link-l: 29%;
+  --bulma-scheme-h: 35; --bulma-scheme-s: 39%;
+}
+html[data-kn-theme="social-pulse"] {
+  --t-ink: #173038; --t-muted: #4f6870; --t-bg: #ecf7f7; --t-nav: #ecf7f7;
+  --t-panel: #fff; --t-panel2: #dff2f1; --t-line: #c9e2e3;
+  --t-accent: #d94e3e; --t-accent-ink: #fff; --t-soft: #d9f1ef;
+  --t-font: Inter, ui-sans-serif, system-ui, sans-serif; --t-head-font: var(--t-font);
+  --t-radius: 18px; --t-control-radius: 999px;
+  --bulma-primary-h: 6deg; --bulma-primary-s: 67%; --bulma-primary-l: 55%;
+  --bulma-link-h: 6deg; --bulma-link-s: 67%; --bulma-link-l: 50%;
+  --bulma-scheme-h: 180; --bulma-scheme-s: 41%;
+}
+
+/* ---------- shared rules, active for any theme but classic ---------- */
+html[data-kn-theme]:not([data-kn-theme="classic"]) {
+  --bulma-family-primary: var(--t-font);
+  --bulma-body-color: var(--t-ink);
+  --bulma-text: var(--t-ink);
+  --bulma-text-strong: var(--t-ink);
+  --bulma-border: var(--t-line);
+  background: var(--t-bg);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) body {
+  background: var(--t-bg);
+  color: var(--t-ink);
+  font-family: var(--t-font);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) :focus-visible {
+  outline: 3px solid var(--t-accent);
+  outline-offset: 2px;
+}
+
+/* Your logo, on a white plate: it was drawn on white, so its black record and
+   light grey letters stay readable on every theme, light or dark. */
+.kn-brandbar { display: none; }
+html[data-kn-theme]:not([data-kn-theme="classic"]) .kn-brandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px 12px;
+}
+.kn-logo-plate {
+  display: inline-flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 12px;
+  padding: 4px 10px;
+  box-shadow: 0 0 0 1px var(--t-line), 0 6px 18px rgb(0 0 0 / 18%);
+}
+.kn-logo-plate img { display: block; height: 104px; width: auto; }
+.kn-brand-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t-muted);
+}
+@media (max-width: 480px) {
+  .kn-logo-plate img { height: 72px; }
+}
+
+/* Navigation */
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary {
+  background: var(--t-nav);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-radius);
+  --bulma-navbar-item-color: var(--t-muted);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary .navbar-item,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary .navbar-burger {
+  color: var(--t-muted);
+  font-weight: 700;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary a.navbar-item.is-active {
+  color: var(--t-ink);
+  background: var(--t-soft);
+  border-radius: var(--t-control-radius);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary a.navbar-item.is-active .icon {
+  color: var(--t-accent);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar.is-primary .navbar-item:hover {
+  color: var(--t-ink);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .navbar-menu {
+  background: var(--t-panel);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-radius);
+}
+
+/* Panels and type */
+html[data-kn-theme]:not([data-kn-theme="classic"]) .box,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .modal-card-body,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .card,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .panel {
+  background: var(--t-panel);
+  color: var(--t-ink);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-radius);
+  box-shadow: none;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .modal-card-head,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .modal-card-foot,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .card-header {
+  background: var(--t-panel2);
+  border-color: var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .title,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .subtitle,
+html[data-kn-theme]:not([data-kn-theme="classic"]) h1,
+html[data-kn-theme]:not([data-kn-theme="classic"]) h2,
+html[data-kn-theme]:not([data-kn-theme="classic"]) h3,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .modal-card-title,
+html[data-kn-theme]:not([data-kn-theme="classic"]) strong,
+html[data-kn-theme]:not([data-kn-theme="classic"]) label {
+  color: var(--t-ink);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .title {
+  font-family: var(--t-head-font);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-grey,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-grey-light,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-grey-lighter,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .help {
+  color: var(--t-muted) !important;
+}
+/* Bulma's fixed colour helpers, made to fit each theme: dark blocks become the
+   theme's second panel, white text the theme's ink, and the state colours
+   darker on light themes so they keep their contrast. */
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-background-black-bis,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-background-dark {
+  background: var(--t-panel2) !important;
+  color: var(--t-ink);
+  border: 1px solid var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .box .has-text-white,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .modal .has-text-white {
+  color: var(--t-ink) !important;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-warning { color: var(--t-warn) !important; }
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-success { color: var(--t-ok) !important; }
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-danger { color: var(--t-bad) !important; }
+html[data-kn-theme]:not([data-kn-theme="classic"]) .has-text-info { color: var(--t-info) !important; }
+html[data-kn-theme="club-console"], html[data-kn-theme="broadcast"] {
+  --t-warn: #f4c152; --t-ok: #4cd18a; --t-bad: #ff7a6b; --t-info: #6cc4ff;
+}
+html[data-kn-theme="daylight"], html[data-kn-theme="vinyl-lounge"], html[data-kn-theme="social-pulse"] {
+  --t-warn: #8a5a00; --t-ok: #1e7a45; --t-bad: #b3261e; --t-info: #1d5fa8;
+}
+
+html[data-kn-theme]:not([data-kn-theme="classic"]) .box a:not([class]) {
+  color: var(--t-accent);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) hr {
+  background: var(--t-line);
+}
+
+/* Controls */
+html[data-kn-theme]:not([data-kn-theme="classic"]) .input,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .textarea,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .select select {
+  background: var(--t-panel);
+  color: var(--t-ink);
+  border-color: var(--t-line);
+  border-radius: var(--t-control-radius);
+  box-shadow: none;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .input::placeholder {
+  color: var(--t-muted);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .button {
+  border-radius: var(--t-control-radius);
+  font-weight: 700;
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .button:not(.is-primary):not(.is-success):not(.is-danger):not(.is-warning):not(.is-info):not(.is-link):not(.is-text):not(.delete) {
+  background: var(--t-panel2);
+  color: var(--t-ink);
+  border-color: var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .button.is-primary,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .button.is-success:not(.is-light):not(.is-outlined),
+html[data-kn-theme]:not([data-kn-theme="classic"]) .button.is-link:not(.is-light):not(.is-outlined) {
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+  color: var(--t-accent-ink);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) input[type="checkbox"],
+html[data-kn-theme]:not([data-kn-theme="classic"]) input[type="radio"] {
+  accent-color: var(--t-accent);
+}
+
+/* Lists: queue rows, song rows, tables */
+html[data-kn-theme]:not([data-kn-theme="classic"]) .table {
+  background: transparent;
+  color: var(--t-ink);
+  --bulma-table-cell-border-color: var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .table td,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .table th {
+  border-color: var(--t-line);
+  color: var(--t-ink);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .table.is-striped tbody tr:not(.is-selected):nth-child(even) {
+  background: var(--t-panel2);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .tabs a {
+  color: var(--t-muted);
+  border-bottom-color: var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .tabs li.is-active a {
+  color: var(--t-accent);
+  border-bottom-color: var(--t-accent);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .pagination-link,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .pagination-previous,
+html[data-kn-theme]:not([data-kn-theme="classic"]) .pagination-next {
+  background: var(--t-panel);
+  color: var(--t-ink);
+  border-color: var(--t-line);
+}
+html[data-kn-theme]:not([data-kn-theme="classic"]) .pagination-link.is-current {
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+  color: var(--t-accent-ink);
+}
+
+/* ---------- what makes each theme its own ---------- */
+
+/* Club Console: a DJ booth. The bar reads like a channel strip. */
+html[data-kn-theme="club-console"] .navbar.is-primary {
+  box-shadow: inset 0 -2px 0 var(--t-accent);
+}
+
+/* Daylight: serif headings, warm paper. */
+html[data-kn-theme="daylight"] .title { font-weight: 700; letter-spacing: -0.04em; }
+
+/* Broadcast: a live show. Square corners, a red top rule, upper case. */
+html[data-kn-theme="broadcast"] .navbar.is-primary { border-top: 6px solid var(--t-accent); }
+html[data-kn-theme="broadcast"] .title,
+html[data-kn-theme="broadcast"] .navbar-item,
+html[data-kn-theme="broadcast"] .button { text-transform: uppercase; letter-spacing: 0.03em; }
+html[data-kn-theme="broadcast"] .title { font-weight: 400; }
+
+/* Vinyl Lounge: warm cream with a dark bar, like a record sleeve. */
+html[data-kn-theme="vinyl-lounge"] .navbar.is-primary { background: #262321; border-color: #262321; }
+html[data-kn-theme="vinyl-lounge"] .navbar.is-primary .navbar-item,
+html[data-kn-theme="vinyl-lounge"] .navbar.is-primary .navbar-burger { color: #d6c7b6; }
+html[data-kn-theme="vinyl-lounge"] .navbar.is-primary a.navbar-item.is-active { background: #3a342f; color: #fff6e9; }
+html[data-kn-theme="vinyl-lounge"] .navbar.is-primary a.navbar-item.is-active .icon { color: #79d4d4; }
+
+/* Social Pulse: round pills, the current page in a dark pill. */
+html[data-kn-theme="social-pulse"] .navbar.is-primary { background: #fff; }
+html[data-kn-theme="social-pulse"] .navbar.is-primary a.navbar-item { border-radius: 999px; }
+html[data-kn-theme="social-pulse"] .navbar.is-primary a.navbar-item.is-active { background: #173038; color: #fff; }
+html[data-kn-theme="social-pulse"] .navbar.is-primary a.navbar-item.is-active .icon { color: #fff; }
+html[data-kn-theme="social-pulse"] .box { box-shadow: 0 10px 30px rgb(23 48 56 / 8%); }
+
+/* ---------- the theme picker in Settings, Look ---------- */
+.kn-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.kn-theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  border: 2px solid var(--bulma-border);
+  border-radius: 12px;
+  font: inherit;
+}
+.kn-theme-card.is-current { border-color: var(--bulma-primary); }
+.kn-theme-card:focus-visible { outline: 3px solid var(--bulma-primary); outline-offset: 2px; }
+.kn-theme-sample {
+  display: block;
+  height: 64px;
+  border-radius: 8px;
+  padding: 10px;
+}
+.kn-theme-sample-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  border-radius: 6px;
+  padding: 6px;
+}
+.kn-theme-sample-line { display: block; width: 60%; height: 6px; border-radius: 3px; }
+.kn-theme-sample-button { display: block; width: 40%; height: 10px; border-radius: 5px; }
+.kn-theme-name { font-weight: 800; font-size: 0.9rem; }
+.kn-theme-blurb { font-size: 0.75rem; opacity: 0.75; line-height: 1.3; }

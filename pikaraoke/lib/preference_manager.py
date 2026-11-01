@@ -90,6 +90,8 @@ class PreferenceManager:
         # Where it sits: top-left, top-center, top-right, center, bottom-left,
         # bottom-center or bottom-right
         "end_countdown_position": "top-center",
+        # The look of the guest and host pages: an id from lib/ui_themes.py
+        "ui_theme": "classic",
     }
 
     def __init__(self, config_file_path: str = "config.ini", target: object | None = None) -> None:

@@ -362,6 +362,46 @@ with sync_playwright() as p:
     )
     admin_page.screenshot(path=str(OUT_DIR / "host-settings.png"), full_page=True)
 
+    # Themes: the host picks one in Settings, Look; every open page follows.
+    # A second page, open on the queue, stands in for every other phone.
+    other = admin_ctx.new_page()
+    other.goto(f"{SITE}/queue")
+    other.wait_for_load_state("networkidle")
+    admin_page.goto(f"{SITE}/settings")
+    admin_page.wait_for_load_state("networkidle")
+    admin_page.click("h3:text-is('Look')")
+    admin_page.click(".kn-theme-card[data-theme-id='social-pulse']")
+    check(
+        "a theme previews on the page before it is saved",
+        admin_page.evaluate("document.documentElement.dataset.knTheme") == "social-pulse",
+    )
+    admin_page.click("#kn-theme-apply")
+    check(
+        "Apply switches other open pages at once",
+        wait_for(
+            lambda: other.evaluate("document.documentElement.dataset.knTheme") == "social-pulse",
+            10,
+        ),
+        str(
+            other.evaluate(
+                "({theme: document.documentElement.dataset.knTheme, socket: !!window.socket,"
+                " connected: !!(window.socket && window.socket.connected),"
+                " handler: !!window.knThemeHandler, url: location.href})"
+            )
+        ),
+    )
+    other.close()
+    phone.goto(f"{SITE}/queue")
+    check(
+        "the next page a phone opens carries the theme and the logo plate",
+        phone.evaluate("document.documentElement.dataset.knTheme") == "social-pulse"
+        and phone.is_visible(".kn-logo-plate img"),
+    )
+    phone.screenshot(path=str(OUT_DIR / "theme-social-pulse.png"), full_page=True)
+    admin_ctx.request.post(
+        f"{SITE}/api/change_preferences", form={"pref": "ui_theme", "val": "classic"}
+    )
+
     check(
         "no CSP violations or JS errors on any page",
         not console_problems,

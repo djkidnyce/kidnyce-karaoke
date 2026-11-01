@@ -22,6 +22,7 @@ from flask_socketio import SocketIO
 
 from pikaraoke import VERSION, karaoke
 from pikaraoke.constants import LANGUAGES
+from pikaraoke.lib import ui_themes
 from pikaraoke.lib.admin_auth import AdminAuth
 from pikaraoke.lib.args import parse_pikaraoke_args
 from pikaraoke.lib.auth import document_auth, install_auth_gate
@@ -117,6 +118,8 @@ app.wsgi_app = BasePathMiddleware(app.wsgi_app, args.base_path)
 # because it does not exist yet at import time.
 app.jinja_env.globals.update(
     is_admin=is_admin,
+    ui_theme=lambda: ui_themes.theme(get_karaoke_instance().preferences.get_or_default("ui_theme")),
+    ui_theme_light=lambda: {t.id: t.light for t in ui_themes.THEMES},
     active_session_name=lambda: get_karaoke_instance().play_history.get_current_session_name(),
     has_active_session=lambda: get_karaoke_instance().play_history.has_active_session(),
 )

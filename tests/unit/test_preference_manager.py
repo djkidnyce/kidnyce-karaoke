@@ -316,6 +316,7 @@ def test_preference_manager_defaults_exist():
         "show_time_left_to_guests",
         "end_countdown_seconds",
         "end_countdown_position",
+        "ui_theme",
     }
 
     assert set(PreferenceManager.DEFAULTS.keys()) == expected_keys
