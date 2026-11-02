@@ -73,3 +73,28 @@ class TestFollow:
         with patch.object(karaoke_module, "get_ip") as got:
             Karaoke._follow_address(k)
         got.assert_not_called()
+
+
+class TestHostAddress:
+    """The small print on the screens: the host's own name when guests use the tunnel."""
+
+    def test_host_url_wins(self):
+        from types import SimpleNamespace
+
+        from pikaraoke.routes.display import host_address
+
+        k = SimpleNamespace(
+            url="https://karaoke.example.com", host_url="https://host.karaoke.example.com"
+        )
+        assert host_address(k) == "https://host.karaoke.example.com"
+
+    def test_falls_back_to_the_guest_url(self):
+        from types import SimpleNamespace
+
+        from pikaraoke.routes.display import host_address
+
+        assert (
+            host_address(SimpleNamespace(url="https://k.example.com", host_url=None))
+            == "https://k.example.com"
+        )
+        assert host_address(SimpleNamespace(url="https://k.example.com")) == "https://k.example.com"

@@ -91,6 +91,27 @@ def test_never_replaces_someone_elses_record(tmp_path, api):
     assert not (tmp_path / "tunnel.token").exists()
 
 
+def test_moving_the_main_name_onto_the_tunnel_replaces_our_lan_record(tmp_path, api):
+    # Venue mode left an A record for the name (made by kidnyce-karaoke-ddns).
+    # Switching to --guests tunnel replaces it with the tunnel's CNAME, and
+    # leaves a record for another name alone.
+    ours = {
+        "id": "lan",
+        "type": "A",
+        "name": HOST,
+        "content": "192.168.6.186",
+        "comment": "Kid Nyce Karaoke Pi LAN address",
+    }
+    theirs = {"id": "www", "type": "A", "name": "www.kidnyce.com", "content": "203.0.113.9"}
+    MockCloudflare.records = [ours, theirs]
+    result = run(tmp_path, api, "setup")
+    assert result.returncode == 0, result.stderr
+    assert theirs in MockCloudflare.records
+    assert ours not in MockCloudflare.records
+    cname = [r for r in MockCloudflare.records if r["name"] == HOST]
+    assert len(cname) == 1 and cname[0]["type"] == "CNAME" and cname[0]["proxied"] is True
+
+
 def test_status_reports_the_connections(tmp_path, api):
     run(tmp_path, api, "setup")
     result = run(tmp_path, api, "status")

@@ -3,8 +3,8 @@
 <img src="docs/images/kidnyce-logo.png" alt="Kid Nyce Karaoke: Lets Sing Kid Nyce Karaoke" width="600">
 
 Karaoke for Kid Nyce's gigs. A fork of [PiKaraoke](https://github.com/vicwomg/pikaraoke)
-built for a Raspberry Pi with one or two TVs, served over HTTPS at
-`karaoke.kidnyce.com`. Guests scan a QR code, type nothing, and queue songs from their
+built for a Raspberry Pi with one or two TVs, served over HTTPS at your own name
+(mine is `karaoke.kidnyce.com`). Guests scan a QR code, type nothing, and queue songs from their
 phones.
 
 ## What this fork adds
@@ -30,10 +30,13 @@ upstream does. Details, release notes and how upstream updates come in:
 sudo apt install -y git
 git clone https://github.com/djkidnyce/kidnyce-karaoke.git
 cd kidnyce-karaoke
-sudo ./deploy/install-pi.sh --cf-token-file ~/cloudflare.token
+sudo ./deploy/install-pi.sh
 ```
 
-No domain or Cloudflare account? Use `sudo ./deploy/install-pi.sh --local-only`.
+It asks for your Cloudflare token, lets you pick your domain from the ones the token
+can edit, and asks how guests reach it: through a Cloudflare Tunnel (venue WiFi and
+cellular) or on the venue network only. No domain or Cloudflare account? Press Enter
+at the token prompt, or use `--local-only`, and phones join at the Pi's own address.
 The full guide, Cloudflare setup included, is in [deploy/README.md](deploy/README.md).
 
 ## Upstream

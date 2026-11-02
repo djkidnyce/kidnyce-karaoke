@@ -84,7 +84,7 @@ rm -f /etc/kidnyce-karaoke/tunnel.env /etc/kidnyce-karaoke/public.env /etc/kidny
     /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf /usr/local/bin/cloudflared
 
 echo "== Running the installer"
-"$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk --no-ddns \
+"$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk --no-ddns --domain "$DOMAIN" \
     --dns-provider hook --dns-auth-hook "$WORK/auth-hook" --dns-cleanup-hook "$WORK/cleanup-hook" \
     --acme-server https://127.0.0.1:14000/dir --acme-ca-bundle "$ACME_CA" \
     3>&1 | tee "$WORK/install.out"
@@ -392,7 +392,55 @@ kidnyce-karaoke join-from venue >/dev/null
 check "join-from venue puts it back" grep -q "^https://$DOMAIN/join/" <<<"$(join_url)"
 # shellcheck disable=SC2016
 check "the screens get the host address" jq -e --arg u "https://$DOMAIN" '.host.show == true and .host.url == $u' <<<"$(curl -fs "http://127.0.0.1:$PORT/api/display/state")"
-if tunnel_install --no-tunnel >"$WORK/install-notunnel.out" 2>&1 &&
+echo "== Guests through the tunnel at the main name, host at its own name"
+# Venue mode left this Pi's LAN address record on the main name; moving the
+# name onto the tunnel replaces it, and the karaoke-test tunnel goes away.
+HOSTN="host.$DOMAIN"
+curl -fs -X POST -H 'Content-Type: application/json' \
+    -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"192.168.6.186\",\"comment\":\"Kid Nyce Karaoke Pi LAN address\"}" \
+    "$MOCK/seed" >/dev/null
+if tunnel_install --guests tunnel --host-name "$HOSTN" >"$WORK/install-guests-tunnel.out" 2>&1; then
+    pass "installer moves guests onto the tunnel at $DOMAIN"
+else
+    fail "installer moves guests onto the tunnel at $DOMAIN: $(tail -n 3 "$WORK/install-guests-tunnel.out" | tr '\n' ' ')"
+fi
+mock_state=$(curl -fs "$MOCK/state" || echo '{}')
+# shellcheck disable=SC2016
+check "the tunnel serves the main name only" jq -e --arg h "$DOMAIN" '.result.config.config.ingress[0].hostname == $h and (.result.config.config.ingress | length) == 2' <<<"$mock_state"
+check "the karaoke-test tunnel was deleted" jq -e '[.result.tunnels[].name] == ["kidnyce-karaoke-karaoke"]' <<<"$mock_state"
+# shellcheck disable=SC2016
+check "the LAN record on the main name became the tunnel's CNAME" jq -e --arg h "$DOMAIN" '[.result.records[] | select(.name == $h)] | length == 1 and .[0].type == "CNAME" and .[0].proxied == true' <<<"$mock_state"
+# shellcheck disable=SC2016
+check "no record left for karaoke-test" jq -e --arg t "$THOST" '[.result.records[] | select(.name == $t)] == []' <<<"$mock_state"
+check "install.env records tunnel mode and the host name" bash -c "grep -qx GUESTS=tunnel /etc/kidnyce-karaoke/install.env && grep -qx 'VENUE_NAME=$HOSTN' /etc/kidnyce-karaoke/install.env"
+# shellcheck source=/dev/null
+source /etc/kidnyce-karaoke/install.env
+check "the host name has the Let's Encrypt certificate" bash -c "openssl x509 -in '$CERT' -noout -ext subjectAltName | grep -q 'DNS:$HOSTN'"
+nginx -t -q && nginx -s reload
+sleep 1
+PIKARAOKE_PUBLIC_ARGS=$(sed -n "s/^PIKARAOKE_PUBLIC_ARGS=//p" /etc/kidnyce-karaoke/public.env)
+check "the app gets the host name for the screens" test "$PIKARAOKE_PUBLIC_ARGS" = "--host-url https://$HOSTN"
+# shellcheck disable=SC2086
+restart_app $PIKARAOKE_PUBLIC_ARGS
+check "the QR code uses the main name" grep -q "^https://$DOMAIN/join/" <<<"$(join_url)"
+# shellcheck disable=SC2016
+check "the screens show the host login name" jq -e --arg u "https://$HOSTN" '.host.url == $u' <<<"$(curl -fs "http://127.0.0.1:$PORT/api/display/state")"
+mcurl() { curl -s -H "Host: $DOMAIN" -H "CF-Connecting-IP: 203.0.113.7" "$@"; }
+check "guests reach the join page at the main name through the tunnel" test "$(mcurl -o /dev/null -w '%{http_code}' "$T/join")" = 200
+check "host login is refused through the tunnel" bash -c "! curl -s -H 'Host: $DOMAIN' -H 'CF-Connecting-IP: 203.0.113.7' -H 'Content-Type: application/json' -d '$login_json' $T/api/auth | jq -e .authenticated >/dev/null"
+HN=(--resolve "$HOSTN:443:127.0.0.1" --cacert "$WORK/trust.pem")
+check "the host name answers with a trusted certificate" curl -fs "${HN[@]}" "https://$HOSTN/api/healthz"
+check "host login works at the host name" bash -c "curl -fs ${HN[*]} -H 'Content-Type: application/json' -d '$login_json' https://$HOSTN/api/auth | jq -e .authenticated >/dev/null"
+check "the main name is not served on the venue port any more" bash -c "! curl -sk --max-time 3 ${H[*]} $U/api/healthz -o /dev/null"
+if tunnel_install >"$WORK/install-guests-tunnel2.out" 2>&1 && grep -qx GUESTS=tunnel /etc/kidnyce-karaoke/install.env &&
+    grep -q "^HOSTNAME_PUBLIC=$DOMAIN$" /etc/kidnyce-karaoke/tunnel.env; then
+    pass "a rerun with no options keeps guests on the tunnel"
+else
+    fail "a rerun with no options keeps guests on the tunnel: $(tail -n 3 "$WORK/install-guests-tunnel2.out" | tr '\n' ' ')"
+fi
+check "--tunnel with another name is refused in tunnel mode" bash -c "! '$ROOT/deploy/install-pi.sh' --dry-run --yes --skip-hw-check --no-kiosk --tunnel '$THOST' --cf-token-file '$WORK/cf.token' >/dev/null 2>&1"
+# Back to venue mode for the rest of the run.
+if tunnel_install --guests venue --no-tunnel >"$WORK/install-notunnel.out" 2>&1 &&
     [[ ! -e /etc/nginx/sites-enabled/kidnyce-karaoke.tunnel.conf && ! -e /etc/kidnyce-karaoke/tunnel.env && ! -e /etc/kidnyce-karaoke/public.env ]] &&
     curl -fs "$MOCK/state" | jq -e '.result.tunnels == [] and .result.records == []' >/dev/null; then
     pass "--no-tunnel removes it here and at Cloudflare"

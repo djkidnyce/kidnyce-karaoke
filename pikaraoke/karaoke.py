@@ -133,6 +133,7 @@ class Karaoke:
         streaming_format: str = "hls",
         url: str | None = None,
         public_url: str | None = None,
+        host_url: str | None = None,
         url_base_path: str = "",
         youtubedl_proxy: str | None = None,
         # Preference parameters (defaults from PreferenceManager.DEFAULTS)
@@ -253,6 +254,8 @@ class Karaoke:
         self.url_base_path = url_base_path
         self.url = self.get_url()
         self.public_url = public_url.rstrip("/") if public_url else None
+        # Kid Nyce: where the host logs in when guests come in by another name.
+        self.host_url = host_url.rstrip("/") if host_url else None
 
         # Must exist before preferences are applied: the keep_awake setter uses it.
         self._keep_awake = KeepAwake()

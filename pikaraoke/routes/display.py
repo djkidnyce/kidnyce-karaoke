@@ -34,6 +34,12 @@ def _require_screen() -> None:
         abort(404)
 
 
+def host_address(k) -> str:
+    """Where the host logs in: --host-url when guests use another name, else --url."""
+    host_url = getattr(k, "host_url", None)
+    return host_url if isinstance(host_url, str) and host_url else k.url
+
+
 @display_bp.route("/crowd")
 @public
 def crowd():
@@ -71,7 +77,7 @@ def state():
             "host": {
                 "show": k.preferences.get_or_default("show_host_address") is True,
                 "ip": lan_ip(),
-                "url": k.url,
+                "url": host_address(k),
             },
             "queue": queue[:QUEUE_PREVIEW],
             "queue_length": len(queue),

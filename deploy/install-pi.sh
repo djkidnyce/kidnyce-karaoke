@@ -31,7 +31,7 @@
 # See deploy/README.md for every option and the Cloudflare token setup.
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.4.0"
+INSTALLER_VERSION="1.5.0"
 APP_VERSION="1.23.0+preview.0.12"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
@@ -43,7 +43,20 @@ declare -A DENO_SHA256=(
 )
 
 # ---------------------------------------------------------------- defaults
-DOMAIN="karaoke.kidnyce.com"
+# Asked for on a first install, kept on a rerun (from install.env).
+DOMAIN=""
+DOMAIN_SET=0
+# tunnel: guests use DOMAIN through a Cloudflare Tunnel (venue WiFi and cellular).
+# venue: DOMAIN points at the Pi's private address (venue network only).
+GUESTS=""
+# With GUESTS=tunnel: an optional second name for host login on the venue network.
+HOST_NAME=""
+HOST_NAME_SET=0
+# The name on the venue network with a Let's Encrypt certificate and a DNS record
+# that follows the Pi: DOMAIN in venue mode, HOST_NAME in tunnel mode, or none.
+VENUE_NAME=""
+# What the Karaoke Host icon on the Pi opens.
+HOST_OPEN_URL=""
 ZONE=""
 EMAIL=""
 DNS_PROVIDER="cloudflare"
@@ -114,8 +127,18 @@ usage() {
     cat <<EOF
 
 Options:
-  --domain NAME            Hostname guests use (default: $DOMAIN)
+  --domain NAME            Hostname guests use, such as karaoke.example.com. Asked for on a
+                           first install (with a Cloudflare token, picked from your zones).
+                           A rerun keeps it.
   --zone NAME              DNS zone that holds it (default: the domain minus its first label)
+  --guests MODE            tunnel: guests use the domain through a Cloudflare Tunnel, on the
+                           venue WiFi and on cellular (needs internet at the venue).
+                           venue (default with --yes): the domain points at the Pi's private
+                           address, venue network only. Asked for on a first install.
+  --host-name NAME         With --guests tunnel: a second name for host login on the venue
+                           network, with a trusted certificate, such as host.karaoke.example.com.
+                           Same token. Without one the host logs in on the Pi itself.
+  --no-host-name           Drop the host login name
   --email ADDRESS          Let's Encrypt account email (optional)
   --dns-provider NAME      cloudflare (default), route53, hook, manual, selfsigned or none
   --local-only             No domain name and no Cloudflare token: phones join on the venue
@@ -166,7 +189,10 @@ EOF
 # ---------------------------------------------------------------- args
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain) DOMAIN=$2; shift ;;
+        --domain) DOMAIN=$2; DOMAIN_SET=1; shift ;;
+        --guests) GUESTS=$2; shift ;;
+        --host-name) HOST_NAME=$2; HOST_NAME_SET=1; shift ;;
+        --no-host-name) HOST_NAME=""; HOST_NAME_SET=1 ;;
         --zone) ZONE=$2; shift ;;
         --email) EMAIL=$2; shift ;;
         --dns-provider) DNS_PROVIDER=$2; DNS_SET=1; shift ;;
@@ -207,7 +233,6 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-[[ -n $ZONE ]] || ZONE=${DOMAIN#*.}
 [[ $DNS_PROVIDER == cloudflare ]] || DDNS=0
 
 # ---------------------------------------------------------------- helpers
@@ -240,7 +265,7 @@ render() {
     local text
     text=$(<"$1")
     local name
-    for name in DOMAIN PORT PREFIX DATA_DIR ETC_DIR APP_USER KIOSK_USER CERT KEY APP_URL \
+    for name in DOMAIN PORT PREFIX DATA_DIR ETC_DIR APP_USER KIOSK_USER CERT KEY APP_URL VENUE_NAME HOST_OPEN_URL \
         LISTEN_HTTP2 HTTP2_DIRECTIVE TUNNEL_HOSTNAME TUNNEL_PORT; do
         text=${text//@@$name@@/${!name:-}}
     done
@@ -287,7 +312,7 @@ preflight() {
     [[ $EUID -eq 0 ]] || die "run with sudo: sudo $0"
     ((BASH_VERSINFO[0] >= 5)) || die "bash 5 or newer is required"
 
-    [[ $DOMAIN =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "not a valid hostname: $DOMAIN"
+    [[ -z $GUESTS || $GUESTS =~ ^(tunnel|venue)$ ]] || die "--guests must be tunnel or venue"
     case "$DNS_PROVIDER" in cloudflare | route53 | hook | manual | selfsigned | none) ;; *) die "unknown --dns-provider $DNS_PROVIDER" ;; esac
     # A rerun keeps local only mode unless a provider is named again.
     if ((!DNS_SET)) && [[ -f $ETC_DIR/install.env ]] && grep -qx 'DNS_PROVIDER=none' "$ETC_DIR/install.env"; then
@@ -310,21 +335,6 @@ preflight() {
     if ! [[ $NET_WAIT_SECONDS =~ ^[0-9]+$ ]] || ((NET_WAIT_SECONDS < 10 || NET_WAIT_SECONDS > 600)); then
         die "--net-wait must be 10 to 600 seconds"
     fi
-    # A rerun keeps the tunnel set up earlier, unless --no-tunnel.
-    if [[ -z $TUNNEL_HOSTNAME ]] && ((!TUNNEL_OFF)) && [[ -f $ETC_DIR/tunnel.env ]]; then
-        TUNNEL_HOSTNAME=$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$ETC_DIR/tunnel.env")
-    fi
-    ((TUNNEL_OFF)) && TUNNEL_HOSTNAME=""
-    # Local only has no domain to put a tunnel name under; a rerun removes one.
-    [[ $DNS_PROVIDER == none ]] && TUNNEL_HOSTNAME=""
-    if [[ -n $TUNNEL_HOSTNAME ]]; then
-        [[ $TUNNEL_HOSTNAME =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "--tunnel: not a valid hostname: $TUNNEL_HOSTNAME"
-        [[ $TUNNEL_HOSTNAME == *."$ZONE" ]] || die "--tunnel: $TUNNEL_HOSTNAME must be inside the zone $ZONE"
-        # The venue name keeps its own DNS record and certificate. Sharing it would
-        # break the venue network path, so the internet name is a separate one.
-        [[ $TUNNEL_HOSTNAME != "$DOMAIN" ]] || die "--tunnel must be a different name from --domain $DOMAIN, such as karaoke-test.$ZONE"
-    fi
-
     # shellcheck source=/dev/null
     source /etc/os-release
     OS_CODENAME=${VERSION_CODENAME:-unknown}
@@ -435,7 +445,7 @@ build_wheel_from_source() {
 CF_TOKEN=""
 read_cloudflare_token() {
     [[ $DNS_PROVIDER == none ]] && return 0
-    [[ $DNS_PROVIDER == cloudflare || -n $TUNNEL_HOSTNAME || $TUNNEL_OFF == 1 ]] || return 0
+    [[ $DNS_PROVIDER == cloudflare || $GUESTS == tunnel || -n $TUNNEL_HOSTNAME || $TUNNEL_OFF == 1 || -f $ETC_DIR/tunnel.env ]] || return 0
     if [[ -n $CF_TOKEN_FILE ]]; then
         [[ -r $CF_TOKEN_FILE ]] || die "cannot read --cf-token-file $CF_TOKEN_FILE"
         CF_TOKEN=$(tr -d ' \r\n' <"$CF_TOKEN_FILE")
@@ -447,12 +457,14 @@ read_cloudflare_token() {
     elif ((ASSUME_YES)); then
         die "Cloudflare token needed: --cf-token-file PATH or CF_API_TOKEN. No token? Use --local-only to run on the venue network by the Pi's address."
     else
-        info "A Cloudflare token gives phones https://$DOMAIN with a trusted certificate."
+        info "A Cloudflare API token gives phones your own name, such as https://karaoke.example.com,"
+        info "with a trusted certificate. Permissions: Zone, DNS, Edit (and Account, Cloudflare Tunnel,"
+        info "Edit for guests on cellular). deploy/README.md shows how to make one."
         info "No token? Press Enter to run on the local network only, at http://<the Pi's address>."
-        read -r -s -p "    Cloudflare API token (Zone.DNS Edit on $ZONE), or Enter to skip: " CF_TOKEN </dev/tty
+        read -r -s -p "    Cloudflare API token, or Enter to skip: " CF_TOKEN </dev/tty
         echo
         if [[ -z $CF_TOKEN ]]; then
-            [[ $DNS_PROVIDER == cloudflare ]] || die "a token is needed for the tunnel; rerun without --tunnel for local only"
+            [[ $DNS_PROVIDER == cloudflare && $GUESTS != tunnel ]] || die "a token is needed for the tunnel; rerun without --tunnel or --guests tunnel for local only"
             DNS_PROVIDER=none
             DDNS=0
             TUNNEL_HOSTNAME=""
@@ -461,6 +473,158 @@ read_cloudflare_token() {
         fi
     fi
     [[ $CF_TOKEN =~ ^[A-Za-z0-9_-]{20,}$ ]] || die "that does not look like a Cloudflare API token"
+}
+
+# ---------------------------------------------------------------- names
+HOSTNAME_RE='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$'
+
+ask() {
+    # ask "question" default: the answer, or the default on Enter.
+    local reply
+    read -r -p "    $1 [$2]: " reply </dev/tty
+    printf '%s\n' "${reply:-$2}"
+}
+
+# A Cloudflare API GET with the token on stdin, never on a command line.
+cf_get() {
+    printf 'header = "Authorization: Bearer %s"\n' "$CF_TOKEN" |
+        curl -sS --max-time 20 --config - "${CF_API_BASE:-https://api.cloudflare.com/client/v4}$1"
+}
+
+# The active zones this token can see, one per line.
+cf_zone_names() {
+    cf_get "/zones?status=active&per_page=50" | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+if not d.get("success"):
+    sys.exit(1)
+for z in d.get("result") or []:
+    print(z["name"])'
+}
+
+# Which names this install answers to. Asked on a first install, kept on a rerun.
+settle_names() {
+    local saved=$ETC_DIR/install.env saved_guests=""
+    if [[ -f $saved ]]; then
+        saved_guests=$(sed -n 's/^GUESTS=//p' "$saved")
+        if ((!DOMAIN_SET)); then
+            DOMAIN=$(sed -n 's/^DOMAIN=//p' "$saved")
+            [[ -n $ZONE ]] || ZONE=$(sed -n 's/^ZONE=//p' "$saved")
+        fi
+        [[ -n $GUESTS ]] || GUESTS=$(sed -n 's/^GUESTS=//p' "$saved")
+        ((HOST_NAME_SET)) || HOST_NAME=$(sed -n 's/^HOST_NAME=//p' "$saved")
+    fi
+
+    if [[ $DNS_PROVIDER == none ]]; then
+        # No domain: the CLI still wants a word for the box, nothing resolves it.
+        DOMAIN=${DOMAIN:-$(hostname -s 2>/dev/null || echo kidnyce-karaoke).local}
+        GUESTS=venue
+        HOST_NAME=""
+        VENUE_NAME=""
+        TUNNEL_HOSTNAME=""
+        HOST_OPEN_URL="http://127.0.0.1:$PORT/"
+        return 0
+    fi
+
+    if [[ -z $DOMAIN ]]; then
+        ((ASSUME_YES)) && die "--domain is needed, such as --domain karaoke.example.com (its zone must be in your Cloudflare account)"
+        step "Your karaoke address"
+        if [[ $DNS_PROVIDER == cloudflare ]] && ((!DRY_RUN)); then
+            local zones count zone
+            zones=$(cf_zone_names) || die "Cloudflare refused the token. Check it has Zone, DNS, Edit."
+            count=$(grep -c . <<<"$zones" || true)
+            ((count > 0)) || die "this token sees no zones. Give it Zone, DNS, Edit on your domain."
+            if ((count == 1)); then
+                zone=$zones
+                info "your Cloudflare domain: $zone"
+            else
+                info "domains this token can edit:"
+                nl -w4 -s'. ' <<<"$zones"
+                local pick
+                pick=$(ask "Which one (number)" 1)
+                zone=$(sed -n "${pick}p" <<<"$zones")
+                [[ -n $zone ]] || die "no domain number $pick"
+            fi
+            local sub
+            sub=$(ask "Name for the karaoke site under $zone" karaoke)
+            DOMAIN="$sub.$zone"
+            ZONE=$zone
+        else
+            DOMAIN=$(ask "Hostname guests use, such as karaoke.example.com" "")
+        fi
+        DOMAIN=${DOMAIN,,}
+        info "guests will use https://$DOMAIN"
+    fi
+    [[ $DOMAIN =~ $HOSTNAME_RE ]] || die "not a valid hostname: $DOMAIN"
+    [[ -n $ZONE ]] || ZONE=${DOMAIN#*.}
+
+    # The token must reach the zone, or every later step fails less clearly.
+    if [[ -n $CF_TOKEN ]] && ((!DRY_RUN)); then
+        local seen
+        seen=$(cf_get "/zones?name=$ZONE" | python3 -I -c 'import json, sys; d = json.load(sys.stdin); print(len(d.get("result") or []) if d.get("success") else -1)' 2>/dev/null || echo -1)
+        ((seen > 0)) || die "this Cloudflare token cannot see the zone $ZONE. Check --domain, or the token's zone resources."
+        ok "Cloudflare token can edit $ZONE"
+    fi
+
+    if [[ -z $GUESTS ]]; then
+        if [[ $DNS_PROVIDER == cloudflare ]] && ((!ASSUME_YES)); then
+            info "How do guests reach https://$DOMAIN?"
+            info "  1. Through a Cloudflare Tunnel: venue WiFi and cellular both work. Needs internet at the venue."
+            info "  2. Venue network only: the name points at the Pi's own address on the venue WiFi."
+            case "$(ask "Choose 1 or 2" 1)" in
+                1) GUESTS=tunnel ;;
+                2) GUESTS=venue ;;
+                *) die "choose 1 or 2" ;;
+            esac
+        else
+            GUESTS=venue
+        fi
+    fi
+
+    if [[ $GUESTS == tunnel ]]; then
+        # The tunnel needs a Cloudflare token; the host name certificate can come
+        # from any --dns-provider.
+        [[ -n $CF_TOKEN ]] || die "--guests tunnel needs a Cloudflare token (--cf-token-file)"
+        [[ -z $TUNNEL_HOSTNAME || $TUNNEL_HOSTNAME == "$DOMAIN" ]] ||
+            die "with --guests tunnel, guests use --domain $DOMAIN through the tunnel; --tunnel is for --guests venue"
+        ((TUNNEL_OFF)) && die "--no-tunnel and --guests tunnel contradict; use --guests venue to drop the tunnel"
+        TUNNEL_HOSTNAME=$DOMAIN
+        if ((!HOST_NAME_SET)) && [[ -z $HOST_NAME ]] && ((!ASSUME_YES)) && [[ $saved_guests != tunnel ]]; then
+            info "Host login never answers through the tunnel. A second name can serve it on the venue"
+            info "WiFi with a trusted certificate, using the same token. Without it, log in on the Pi itself."
+            HOST_NAME=$(ask "Host login name, or none" "host.$DOMAIN")
+            [[ $HOST_NAME == none ]] && HOST_NAME=""
+        fi
+        HOST_NAME=${HOST_NAME,,}
+        if [[ -n $HOST_NAME ]]; then
+            [[ $HOST_NAME =~ $HOSTNAME_RE ]] || die "--host-name: not a valid hostname: $HOST_NAME"
+            [[ $HOST_NAME == *."$ZONE" ]] || die "--host-name: $HOST_NAME must be inside the zone $ZONE"
+            [[ $HOST_NAME != "$DOMAIN" ]] || die "--host-name must differ from --domain"
+        fi
+        VENUE_NAME=$HOST_NAME
+        [[ -n $VENUE_NAME ]] || DDNS=0
+    else
+        HOST_NAME=""
+        VENUE_NAME=$DOMAIN
+        # A rerun keeps the extra internet name set up earlier, unless --no-tunnel.
+        if [[ -z $TUNNEL_HOSTNAME ]] && ((!TUNNEL_OFF)) && [[ -f $ETC_DIR/tunnel.env ]]; then
+            TUNNEL_HOSTNAME=$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$ETC_DIR/tunnel.env")
+            # Coming back from tunnel mode: that tunnel served the domain itself.
+            [[ $TUNNEL_HOSTNAME == "$DOMAIN" ]] && TUNNEL_HOSTNAME=""
+        fi
+        ((TUNNEL_OFF)) && TUNNEL_HOSTNAME=""
+        if [[ -n $TUNNEL_HOSTNAME ]]; then
+            [[ $TUNNEL_HOSTNAME =~ $HOSTNAME_RE ]] || die "--tunnel: not a valid hostname: $TUNNEL_HOSTNAME"
+            [[ $TUNNEL_HOSTNAME == *."$ZONE" ]] || die "--tunnel: $TUNNEL_HOSTNAME must be inside the zone $ZONE"
+            # The venue name keeps its own DNS record and certificate. Sharing it would
+            # break the venue network path, so the internet name is a separate one.
+            [[ $TUNNEL_HOSTNAME != "$DOMAIN" ]] || die "--tunnel must be a different name from --domain $DOMAIN, such as karaoke-test.$ZONE. To serve $DOMAIN itself through the tunnel, use --guests tunnel."
+        fi
+    fi
+    # Read by render() for the Karaoke Host icon.
+    # shellcheck disable=SC2034
+    if [[ -n $VENUE_NAME ]]; then HOST_OPEN_URL="https://$VENUE_NAME/"; else HOST_OPEN_URL="http://127.0.0.1:$PORT/"; fi
+    info "guests: https://$DOMAIN ($GUESTS)${VENUE_NAME:+, host login: https://$VENUE_NAME}"
 }
 
 # ---------------------------------------------------------------- 1. packages
@@ -583,6 +747,9 @@ KEY=$KEY
 KIOSK=$KIOSK
 KIOSK_USER=$KIOSK_USER
 DNS_PROVIDER=$DNS_PROVIDER
+GUESTS=$GUESTS
+HOST_NAME=$HOST_NAME
+VENUE_NAME=$VENUE_NAME
 APP_URL=$APP_URL
 VERSION=$APP_VERSION
 EOF
@@ -634,17 +801,17 @@ EOF
 # ---------------------------------------------------------------- 6. certificate
 CERT_KIND=""
 self_signed_cert() {
-    local dir=$ETC_DIR/tls
+    local dir=$ETC_DIR/tls name=${VENUE_NAME:-$DOMAIN}
     CERT=$dir/fullchain.pem
     KEY=$dir/privkey.pem
     CERT_KIND="self signed (browsers will warn)"
     if [[ -f $CERT ]] && openssl x509 -checkend 2592000 -noout -in "$CERT" >/dev/null 2>&1 &&
-        openssl x509 -noout -ext subjectAltName -in "$CERT" 2>/dev/null | grep -q "DNS:$DOMAIN"; then
+        openssl x509 -noout -ext subjectAltName -in "$CERT" 2>/dev/null | grep -q "DNS:$name"; then
         return
     fi
     run install -d -m 700 -o root -g root "$dir"
     run openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -sha256 -nodes -days 397 \
-        -subj "/CN=$DOMAIN" -addext "subjectAltName=DNS:$DOMAIN" \
+        -subj "/CN=$name" -addext "subjectAltName=DNS:$name" \
         -keyout "$KEY" -out "$CERT"
     run chmod 600 "$KEY"
 }
@@ -658,14 +825,22 @@ obtain_certificate() {
         CERT_KIND="none needed: phones use http on the venue network"
         return
     fi
-    step "Getting a TLS certificate for $DOMAIN"
+    if [[ -z $VENUE_NAME ]]; then
+        # Guests come in through the tunnel, where Cloudflare holds the
+        # certificate. Only https://<the Pi's address> is served here.
+        step "No venue name: guests use the tunnel's certificate"
+        self_signed_cert
+        CERT_KIND="Cloudflare's, for https://$DOMAIN through the tunnel (https://<address> on the Pi is self signed)"
+        return
+    fi
+    step "Getting a TLS certificate for $VENUE_NAME"
     if [[ $DNS_PROVIDER == selfsigned ]]; then
         self_signed_cert
         warn "self signed certificate: phones will show a warning. Use a DNS provider for a trusted one."
         return
     fi
 
-    local -a args=(certonly --cert-name "$CERT_NAME" -d "$DOMAIN" --key-type ecdsa --elliptic-curve secp256r1
+    local -a args=(certonly --cert-name "$CERT_NAME" -d "$VENUE_NAME" --key-type ecdsa --elliptic-curve secp256r1
         --keep-until-expiring --agree-tos --deploy-hook "systemctl reload nginx")
     if [[ -n $EMAIL ]]; then args+=(--email "$EMAIL" --no-eff-email); else args+=(--register-unsafely-without-email); fi
     ((STAGING)) && args+=(--staging)
@@ -772,7 +947,11 @@ configure_nginx() {
     fi
     local site=nginx-site.conf
     [[ $DNS_PROVIDER == none ]] && site=nginx-site-local.conf
-    render "$SCRIPT_DIR/files/$site" | "${strip_v6[@]}" | write_file 644 root:root /etc/nginx/sites-available/kidnyce-karaoke.conf
+    # No venue name (guests through the tunnel, host on the Pi): only the
+    # address servers stay. The markers bracket the named servers.
+    local strip_named=(cat)
+    [[ -z $VENUE_NAME ]] && strip_named=(sed '/# venue name start/,/# venue name end/d')
+    render "$SCRIPT_DIR/files/$site" | "${strip_v6[@]}" | "${strip_named[@]}" | write_file 644 root:root /etc/nginx/sites-available/kidnyce-karaoke.conf
     run ln -sfn /etc/nginx/sites-available/kidnyce-karaoke.conf /etc/nginx/sites-enabled/kidnyce-karaoke.conf
     # Debian's default site also claims default_server on port 80.
     if [[ -L /etc/nginx/sites-enabled/default ]]; then
@@ -798,11 +977,11 @@ configure_ddns() {
         fi
         return 0
     fi
-    step "Keeping $DOMAIN pointed at this Pi (Cloudflare DNS)"
+    step "Keeping $VENUE_NAME pointed at this Pi (Cloudflare DNS)"
     printf '%s\n' "$CF_TOKEN" | write_file 600 root:root "$ETC_DIR/cloudflare.token"
     write_file 644 root:root "$ETC_DIR/ddns.env" <<EOF
 # Written by deploy/install-pi.sh. Read by kidnyce-karaoke-ddns.
-DOMAIN=$DOMAIN
+DOMAIN=$VENUE_NAME
 ZONE=$ZONE
 ZONE_ID=$CF_ZONE_ID
 TOKEN_FILE=$ETC_DIR/cloudflare.token
@@ -879,8 +1058,21 @@ configure_tunnel() {
         ok "tunnel removed; guests join on the venue network only"
         return 0
     fi
-    step "Cloudflare Tunnel for guests on cellular: https://$TUNNEL_HOSTNAME"
+    if [[ $GUESTS == tunnel ]]; then
+        step "Cloudflare Tunnel: guests use https://$TUNNEL_HOSTNAME on the venue WiFi and on cellular"
+    else
+        step "Cloudflare Tunnel for guests on cellular: https://$TUNNEL_HOSTNAME"
+    fi
     install_cloudflared
+    # Moving the tunnel to another name (such as from karaoke-test to the main
+    # name): delete the old tunnel and its record first, while its config is here.
+    local old_name=""
+    [[ -f $tenv ]] && old_name=$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$tenv")
+    if [[ -n $old_name && $old_name != "$TUNNEL_HOSTNAME" ]] && ((!DRY_RUN)); then
+        info "moving the tunnel from $old_name to $TUNNEL_HOSTNAME"
+        /usr/local/sbin/kidnyce-karaoke-tunnel remove ||
+            warn "could not delete the tunnel for $old_name at Cloudflare; delete it in the Zero Trust dashboard"
+    fi
     printf '%s\n' "$CF_TOKEN" | write_file 600 root:root "$ETC_DIR/cloudflare.token"
     write_file 644 root:root "$tenv" <<EOF
 # Written by deploy/install-pi.sh. Read by kidnyce-karaoke-tunnel.
@@ -893,9 +1085,17 @@ ORIGIN=http://127.0.0.1:$TUNNEL_PORT
 TUNNEL_TOKEN_FILE=$ETC_DIR/tunnel.token
 ${CF_API_BASE:+CF_API_BASE=$CF_API_BASE}
 EOF
+    # Venue mode: the tunnel name is an extra, internet address for guests.
+    # Tunnel mode: it is the guests' only address, already the app's --url, and
+    # the host's own name (if any) goes in the small print on the screens.
+    local public_args="--public-url https://$TUNNEL_HOSTNAME"
+    if [[ $GUESTS == tunnel ]]; then
+        public_args=""
+        [[ -n $HOST_NAME ]] && public_args="--host-url https://$HOST_NAME"
+    fi
     write_file 644 root:root "$ETC_DIR/public.env" <<EOF
 # Written by deploy/install-pi.sh while the tunnel is on.
-PIKARAOKE_PUBLIC_ARGS=--public-url https://$TUNNEL_HOSTNAME
+PIKARAOKE_PUBLIC_ARGS=$public_args
 EOF
     render "$SCRIPT_DIR/files/kidnyce-karaoke-tunnel.service" | write_file 644 root:root /etc/systemd/system/kidnyce-karaoke-tunnel.service
     if ((!DRY_RUN)) && ! /usr/local/sbin/kidnyce-karaoke-tunnel setup; then
@@ -908,7 +1108,7 @@ EOF
     fi
     systemctl_do daemon-reload
     systemctl_do enable kidnyce-karaoke-tunnel.service
-    ok "https://$TUNNEL_HOSTNAME reaches this Pi through the tunnel (guests only)"
+    ok "https://$TUNNEL_HOSTNAME reaches this Pi through the tunnel (guests only; host login never answers there)"
 }
 
 # ---------------------------------------------------------------- 9. firewall
@@ -1133,12 +1333,24 @@ start_services() {
         else
             die "Nginx is not serving the venue network on port 80. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
         fi
-    elif curl -fsS --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null 2>&1; then
-        ok "https://$DOMAIN answers with a trusted certificate"
-    elif curl -fsSk --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null; then
-        ok "https://$DOMAIN answers (certificate: $CERT_KIND)"
     else
-        die "Nginx is not serving https://$DOMAIN. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
+        if [[ $GUESTS == tunnel ]]; then
+            # The loopback server cloudflared feeds; Cloudflare's side is checked by doctor.
+            if curl -fsS --noproxy '*' --max-time 5 -H "Host: $DOMAIN" "http://127.0.0.1:$TUNNEL_PORT/api/healthz" >/dev/null; then
+                ok "the tunnel's server answers for https://$DOMAIN"
+            else
+                die "Nginx is not serving the tunnel for $DOMAIN. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
+            fi
+        fi
+        if [[ -z $VENUE_NAME ]]; then
+            :
+        elif curl -fsS --noproxy '*' --max-time 5 --resolve "$VENUE_NAME:443:127.0.0.1" "https://$VENUE_NAME/api/healthz" >/dev/null 2>&1; then
+            ok "https://$VENUE_NAME answers with a trusted certificate"
+        elif curl -fsSk --noproxy '*' --max-time 5 --resolve "$VENUE_NAME:443:127.0.0.1" "https://$VENUE_NAME/api/healthz" >/dev/null; then
+            ok "https://$VENUE_NAME answers (certificate: $CERT_KIND)"
+        else
+            die "Nginx is not serving https://$VENUE_NAME. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
+        fi
     fi
     if ((KIOSK)) && [[ $BOOT_MODE == karaoke ]]; then
         systemctl daemon-reload
@@ -1182,10 +1394,17 @@ summary() {
     if [[ $DNS_PROVIDER == none ]]; then
         echo "  Guests:        http://$(lan_ip || echo '<the Pi address>')  (local network only; scan the QR code on the crowd screen)"
         echo "                 The address follows the Pi to any network. Add a domain later: rerun with a Cloudflare token."
+    elif [[ $GUESTS == tunnel ]]; then
+        echo "  Guests:        https://$DOMAIN  (venue WiFi and cellular, through the tunnel; scan the QR code)"
+        if [[ -n $HOST_NAME ]]; then
+            echo "  Host login:    https://$HOST_NAME  (venue network only)"
+        else
+            echo "  Host login:    on the Pi itself (Karaoke Host icon), or https://<the Pi's address> with one warning"
+        fi
     else
         echo "  Guests:        https://$DOMAIN  (scan the QR code on the crowd screen)"
     fi
-    if [[ -n $TUNNEL_HOSTNAME ]]; then
+    if [[ -n $TUNNEL_HOSTNAME && $GUESTS != tunnel ]]; then
         echo "  Internet:      https://$TUNNEL_HOSTNAME  (guests on cellular; Settings, Join code puts it in the QR code)"
     fi
     [[ -n $code ]] && echo "  Join code:     $code  ($url)"
@@ -1225,6 +1444,7 @@ main() {
     printf '%sKid Nyce Karaoke installer %s%s (app %s)\n' "$C_BOLD" "$INSTALLER_VERSION" "$C_OFF" "$APP_VERSION"
     preflight
     read_cloudflare_token
+    settle_names
     install_packages
     create_users_and_dirs
     install_deno

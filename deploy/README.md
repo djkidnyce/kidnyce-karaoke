@@ -1,9 +1,10 @@
 # Deploying Kid Nyce Karaoke on a Raspberry Pi
 
 One script turns a fresh Raspberry Pi OS install into the karaoke box: the app, one
-or two HDMI screens, Nginx with a trusted Let's Encrypt certificate for
-`karaoke.kidnyce.com`, a firewall, and a DNS record that follows the Pi from venue
-to venue.
+or two HDMI screens, Nginx with a trusted certificate for your own name (this guide
+uses `karaoke.kidnyce.com`; yours is asked for on the first run), a firewall, and a
+DNS record that follows the Pi from venue to venue. No domain at all works too, on
+the local network.
 
 ## What you need
 
@@ -13,7 +14,7 @@ to venue.
 | Official 5V 3A USB C supply | Undervoltage throttles the CPU and drops video frames. |
 | microSD (32 GB or more, A2) or USB SSD | Songs live on it. An SSD is faster and lasts longer. |
 | One or two micro HDMI to HDMI cables | With two TVs, HDMI0 (next to USB C) is the singer screen and HDMI1 the room screen. With one TV, either port shows everything. |
-| Cloudflare account with `kidnyce.com` | For the certificate and the DNS record. See below. Optional: without one, see "No domain: local network only". |
+| Cloudflare account with your domain | For the certificate, the DNS record and the tunnel. See below. Optional: without one, see "No domain: local network only". |
 | Optional: USB audio interface | Cleaner than the 3.5 mm jack for feeding your mixer. |
 
 ## 1. Cloudflare (once)
@@ -36,6 +37,43 @@ it, and revoke it from the Cloudflare dashboard if the Pi is ever lost.
 If your DNS is somewhere else, see "Other DNS hosts" at the end. No domain or no
 Cloudflare account at all: skip this step and see "No domain: local network only".
 
+For guests on cellular too (the tunnel), make the token with one more permission:
+**Account, Cloudflare Tunnel, Edit**. Step 1 of the tunnel section below walks
+through it.
+
+## First install: what it asks
+
+Run the installer with no options and it asks, in this order:
+
+1. **Cloudflare API token.** Paste it, or press Enter to skip and run on the local
+   network only (see below).
+2. **Your domain.** The installer lists the domains the token can edit and you pick
+   one, so the address always comes from your own Cloudflare account. With one
+   domain it picks it for you.
+3. **Name for the karaoke site.** `karaoke` by default, which makes
+   `karaoke.<your domain>`.
+4. **How guests reach it.**
+   **1. Through a Cloudflare Tunnel** (recommended): `https://karaoke.<your domain>`
+   works on the venue WiFi and on cellular, with Cloudflare's certificate. The venue
+   needs internet.
+   **2. Venue network only**: the name points at the Pi's private address, with a Let's
+   Encrypt certificate. Works without internet at the venue, not on cellular.
+5. **With the tunnel: a host login name.** Host login never answers through the
+   tunnel, so the host needs another way in. Press Enter for
+   `host.karaoke.<your domain>`: it points at the Pi's private address with a trusted
+   certificate, made with the same token, and works from your phone on the venue
+   WiFi. Type `none` and the host logs in on the Pi itself (Karaoke Host icon), or at
+   `https://<the Pi's address>` after one certificate warning.
+
+A rerun remembers every answer. For an unattended install, give them as options:
+
+```sh
+sudo ./deploy/install-pi.sh --yes --cf-token-file ~/cloudflare.token \
+    --domain karaoke.example.com --guests tunnel --host-name host.karaoke.example.com
+```
+
+With `--yes`, `--domain` is required and guests default to venue network only.
+
 ## No domain: local network only
 
 Everything works without a domain name or a Cloudflare token. Phones join on the
@@ -53,7 +91,7 @@ unattended install never picks a mode you did not ask for. A rerun keeps local o
 rerun with `--cf-token-file` to add the domain later. `--tunnel` is refused in this
 mode, since the tunnel needs the domain.
 
-| | With a domain (default) | Local network only |
+| | With a domain | Local network only |
 | --- | --- | --- |
 | Guests type | `https://karaoke.kidnyce.com` | `http://<the Pi's address>` |
 | Certificate | Let's Encrypt, trusted | none needed; `https://<address>` still answers with a self signed one (one warning) |
@@ -561,11 +599,33 @@ The QR code and the address on the room screen switch within seconds. Phones the
 join from the QR code on WiFi or cellular. `sudo kidnyce-karaoke join-from venue`
 switches back.
 
-### Later: a nicer name
+### Move the main name onto the tunnel
 
-When you are happy with it, move from the test name to a permanent one such as
-`sing.kidnyce.com`: run the installer with `--no-tunnel`, then again with
-`--tunnel sing.kidnyce.com`.
+When the test name works, put `karaoke.kidnyce.com` itself on the tunnel. Guests then
+use one name everywhere, venue WiFi or cellular, and the QR code carries it.
+
+```sh
+sudo ./deploy/install-pi.sh --guests tunnel --host-name host.karaoke.kidnyce.com
+```
+
+The same token does all of it. What happens:
+
+| Step | Result |
+| --- | --- |
+| The `karaoke-test` tunnel and its DNS record | deleted at Cloudflare |
+| The `A` record for `karaoke.kidnyce.com` (the Pi's LAN address) | replaced by a proxied CNAME to the tunnel. Only the record this Pi made is replaced; any other record on the name stops the installer. |
+| `host.karaoke.kidnyce.com` | a new `A` record for the Pi's LAN address, kept current like the old one, with a Let's Encrypt certificate |
+| The QR code | `https://karaoke.kidnyce.com/join/<code>` |
+| The small print on the screens | `https://<address> · host.karaoke.kidnyce.com` |
+
+Log in as host at `https://host.karaoke.kidnyce.com` on the venue WiFi. Leave out
+`--host-name` (or use `--no-host-name` later) and the host logs in on the Pi itself.
+`--guests venue` goes back: the name points at the Pi again and the tunnel is
+removed with `--no-tunnel`.
+
+The tradeoff: with guests on the tunnel the venue needs internet. If it drops,
+phones on the venue WiFi can still reach the Pi at `https://<the Pi's address>`
+after one certificate warning.
 
 ### Turn it off
 
@@ -592,7 +652,7 @@ from the internet.
 | Taking over the host controls | Refused from the tunnel: Nginx marks those requests, the app never treats them as the host. A client cannot set or clear the mark itself. |
 | Reaching the Pi directly | Nothing listens for the internet. The tunnel's Nginx server answers on 127.0.0.1:8081 only, and the Pi's public address stays hidden behind Cloudflare. |
 | The tunnel token | Root only on disk (`/etc/kidnyce-karaoke/tunnel.token`), handed to a throwaway service user by systemd. It can only run this tunnel, not edit your account. |
-| The API token | Root only on disk. It can edit DNS in `kidnyce.com` and tunnels in your account, nothing else. Give it an expiry date. |
+| The API token | Root only on disk. It can edit DNS in your zone and tunnels in your account, nothing else. Give it an expiry date. |
 | Floods | Cloudflare's edge in front, plus the same Nginx rate limits as on the venue network. |
 
 ### Venue networks that block it

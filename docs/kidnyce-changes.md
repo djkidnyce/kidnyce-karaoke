@@ -33,6 +33,7 @@ launches the app on Ubuntu, macOS and Windows.
 | --- | --- | --- |
 | Pi installer | One command: app, Nginx with TLS, Let's Encrypt by DNS challenge, firewall, sandboxed service, DNS record that follows the Pi, screens. Reruns update in place. | `deploy/install-pi.sh` |
 | Local network only | No domain or Cloudflare token: phones join at `http://<the Pi's address>`, and the QR code follows the Pi to any network. | `--local-only`; `--url http://{ip}` in the app |
+| Your own domain | A first install picks the domain from the Cloudflare token's zones; guests come in through a tunnel or on the venue network; the host gets an optional login name. | `deploy/install-pi.sh` (`--domain`, `--guests`, `--host-name`) |
 | One screen or two | Singer lyrics on one TV, QR code, join code and singing order for the room on the other; one TV shows everything. Board and port detection. | `pikaraoke/lib/display_hardware.py`, `deploy/kiosk/` |
 | Join code per night | A 6 character code in the QR code; a new session issues a new one and drops old phones. | `pikaraoke/lib/join_codes.py`, `guest_gate.py` |
 | Break music | Songs between singers, planned to fit the break length. | `pikaraoke/lib/intermission.py` |
@@ -50,6 +51,23 @@ launches the app on Ubuntu, macOS and Windows.
 Bundles are numbered by branch: `main` is what runs at gigs, `preview` is where new
 work is tried first. The app version shows it, for example `1.23.0+preview.0.11`, and
 `sudo kidnyce-karaoke status` prints it as `preview v0.11`.
+
+### preview v0.12
+
+- Upstream's latest fixes and its new icon set (see main v0.9).
+- A first install asks for everything instead of assuming `kidnyce.com`: the
+  Cloudflare token (or Enter for local network only), the domain picked from the
+  ones the token can edit, the site name (`karaoke` by default), and how guests
+  reach it.
+- Guests through the tunnel at the main name (`--guests tunnel`): one address on
+  the venue WiFi and on cellular. The host logs in at an optional second name
+  (`--host-name`, such as `host.karaoke.example.com`, trusted certificate, same
+  token) or on the Pi itself.
+- Moving an existing install onto the tunnel replaces the Pi's own LAN address
+  record and deletes the old test tunnel.
+- The Karaoke Host icon opens the host name, or the app on the Pi itself when
+  there is none (it used to open the domain, which fails through the tunnel or
+  with no domain).
 
 ### preview v0.11
 
@@ -82,6 +100,14 @@ work is tried first. The app version shows it, for example `1.23.0+preview.0.11`
   the desktop when there is no network at boot, a decade of number one hits
   downloaded ahead of a gig, time left tonight, and the singer countdown with a
   choice of where it sits.
+
+### main v0.9
+
+- Upstream PiKaraoke merged in (15 commits): smoother player controls between songs,
+  no splash timestamp flashing, subtitles not rebuilt on every queue change, the
+  waiting song skipped when autoplay is off, a toast on key change, punctuation
+  folded in the library filter, and Phosphor icons in place of Fontello. Guest names
+  stay escaped on the home page.
 
 ### main v0.8
 

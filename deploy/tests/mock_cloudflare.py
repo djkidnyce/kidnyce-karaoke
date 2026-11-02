@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 TOKEN = "test-token-0123456789abcdef0123456789abcdef"
 ZONE_ID = "zone123"
 ACCOUNT_ID = "acct456"
+ZONE_NAME = "example.com"
 
 
 class MockCloudflare(BaseHTTPRequestHandler):
@@ -21,6 +22,7 @@ class MockCloudflare(BaseHTTPRequestHandler):
     records: list[dict] = []
     config: dict | None = None
     calls: list[tuple[str, str, dict | None]] = []
+    next_id = 0
 
     def log_message(self, *args):
         pass
@@ -38,6 +40,12 @@ class MockCloudflare(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length)) if length else None
         self.calls.append((method, self.path, body))
         return body
+
+    def _add_record(self, body):
+        MockCloudflare.next_id += 1
+        record = {"id": f"rec{MockCloudflare.next_id}", **body}
+        self.records.append(record)
+        return record
 
     def _ok(self, result):
         self._reply({"success": True, "errors": [], "result": result})
@@ -57,8 +65,10 @@ class MockCloudflare(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         p = self.path
-        if p.startswith("/client/v4/zones?name="):
-            return self._ok([{"id": ZONE_ID, "account": {"id": ACCOUNT_ID}}])
+        if p.startswith("/client/v4/zones?"):
+            name = re.search(r"name=([^&]+)", p)
+            zone = name.group(1) if name else ZONE_NAME
+            return self._ok([{"id": ZONE_ID, "name": zone, "account": {"id": ACCOUNT_ID}}])
         if p.startswith(f"/client/v4/accounts/{ACCOUNT_ID}/cfd_tunnel?"):
             name = re.search(r"name=([^&]+)", p).group(1)
             return self._ok([t for t in self.tunnels if t["name"] == name])
@@ -70,11 +80,23 @@ class MockCloudflare(BaseHTTPRequestHandler):
             t = next(t for t in self.tunnels if t["id"] == m.group(1))
             return self._ok({**t, "status": "healthy", "connections": [{}, {}, {}, {}]})
         if p.startswith(f"/client/v4/zones/{ZONE_ID}/dns_records?"):
-            return self._ok(self.records)
+            name = re.search(r"name=([^&]+)", p)
+            kind = re.search(r"type=([^&]+)", p)
+            return self._ok(
+                [
+                    r
+                    for r in self.records
+                    if (not name or r["name"] == name.group(1))
+                    and (not kind or r["type"] == kind.group(1))
+                ]
+            )
         self._reply({"success": False}, 404)
 
     def do_POST(self):
         body = self._body("POST")
+        if self.path == "/seed":
+            # Tests only: a record that exists before the installer runs.
+            return self._ok(self._add_record(body))
         if not self._authorized():
             return
         if self.path == f"/client/v4/accounts/{ACCOUNT_ID}/cfd_tunnel":
@@ -82,9 +104,7 @@ class MockCloudflare(BaseHTTPRequestHandler):
             self.tunnels.append(tunnel)
             return self._ok(tunnel)
         if self.path == f"/client/v4/zones/{ZONE_ID}/dns_records":
-            record = {"id": f"rec{len(self.records) + 1}", **body}
-            self.records.append(record)
-            return self._ok(record)
+            return self._ok(self._add_record(body))
         self._reply({"success": False}, 404)
 
     def do_PUT(self):

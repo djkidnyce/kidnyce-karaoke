@@ -134,6 +134,14 @@ def parse_pikaraoke_args() -> argparse.Namespace:
         required=False,
     )
     server.add_argument(
+        "--host-url",
+        help="Address the host uses on the venue network when guests use another one, "
+        "such as https://host.karaoke.example.com while guests come in through a tunnel. "
+        "Shown in small print on the screens.",
+        default=None,
+        required=False,
+    )
+    server.add_argument(
         "--base-path",
         help="URL path prefix for reverse proxy deployments (e.g., /karaoke). Requires a reverse proxy to handle the path routing; PiKaraoke only generates correct URLs with this prefix.",
         default="",

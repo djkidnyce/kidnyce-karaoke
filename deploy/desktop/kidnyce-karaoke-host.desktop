@@ -2,7 +2,7 @@
 Type=Application
 Name=Karaoke Host
 Comment=Open the host page and Settings in the browser.
-Exec=xdg-open https://@@DOMAIN@@/
+Exec=xdg-open @@HOST_OPEN_URL@@
 Icon=kidnyce-karaoke
 Terminal=false
 Categories=AudioVideo;

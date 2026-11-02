@@ -301,6 +301,7 @@ def main() -> None:
         splash_scale=args.splash_scale,
         url=args.url,
         public_url=args.public_url,
+        host_url=args.host_url,
         prefer_hostname=args.prefer_hostname,
         disable_bg_music=args.disable_bg_music,
         bg_music_volume=args.bg_music_volume,

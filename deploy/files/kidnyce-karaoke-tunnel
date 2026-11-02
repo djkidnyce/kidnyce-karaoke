@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Sets up, checks and removes the Cloudflare Tunnel that lets guests on
-# cellular data reach the Pi at an internet name such as
-# karaoke-test.kidnyce.com.
+# Sets up, checks and removes the Cloudflare Tunnel that lets guests reach the
+# Pi at an internet name: the main name (--guests tunnel), or an extra one
+# such as karaoke-test.example.com next to a venue only main name.
 #
 #   kidnyce-karaoke-tunnel setup    create or reuse the tunnel, route the name to
 #                                   it, save the token for cloudflared
@@ -29,6 +29,8 @@ source "$CONFIG"
 API=${CF_API_BASE:-https://api.cloudflare.com/client/v4}
 TUNNEL_NAME=${TUNNEL_NAME:-kidnyce-karaoke-$(hostname -s)}
 COMMENT="Kid Nyce Karaoke tunnel for internet guests"
+# What kidnyce-karaoke-ddns writes on its A record.
+DDNS_COMMENT="Kid Nyce Karaoke Pi LAN address"
 
 log() { printf '%s\n' "kidnyce-tunnel: $*" >&2; }
 die() { log "$*"; exit 1; }
@@ -101,8 +103,17 @@ cmd_setup() {
     response=$(cf PUT "$API/accounts/$ACCOUNT_ID/cfd_tunnel/$id/configurations" "$body")
     ok_or_die "routing $HOSTNAME_PUBLIC" "$response"
 
-    # Never replace a record someone else made for this name.
+    # Never replace a record someone else made for this name. The one exception
+    # is this Pi's own LAN address record (venue mode, made by
+    # kidnyce-karaoke-ddns), which moving the name onto the tunnel replaces.
     target="$id.cfargotunnel.com"
+    records=$(records_for)
+    local own
+    for own in $(jq -r --arg c "$DDNS_COMMENT" '.[] | select(.type == "A" and .comment == $c) | .id' <<<"$records"); do
+        response=$(cf DELETE "$API/zones/$ZONE_ID/dns_records/$own")
+        ok_or_die "replacing the LAN address record for $HOSTNAME_PUBLIC" "$response"
+        log "removed this Pi's LAN address record for $HOSTNAME_PUBLIC; the tunnel serves it now"
+    done
     records=$(records_for)
     other=$(jq -r '[.[] | select(.type != "CNAME")] | length' <<<"$records")
     ((other == 0)) || die "$HOSTNAME_PUBLIC already has other DNS records. Pick another name with --tunnel, or delete them first."
