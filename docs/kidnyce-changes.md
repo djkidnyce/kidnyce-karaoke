@@ -40,7 +40,7 @@ launches the app on Ubuntu, macOS and Windows.
 | Charts | Most requested songs, tonight and all time, and every Billboard Hot 100 number one. | `pikaraoke/lib/request_stats.py`, `number_ones.py` |
 | Themes | Six looks for the guest and host pages, picked in Settings, Look. | `pikaraoke/lib/ui_themes.py`, `static/kn-themes.css` |
 | Header logo | Optional; the host uploads one in Settings, Look. PNG, JPEG or WebP, checked by content. | `pikaraoke/lib/branding.py`, `routes/branding.py` |
-| Sound | Output and device volume in Settings; the volume survives a power cut. | `deploy/files/kidnyce-karaoke-alsa-save*` |
+| Sound | Output and device volume in Settings; the volume survives a power cut, saved 30 seconds after a change. | `deploy/files/kidnyce-karaoke-alsa-watch*` |
 | Night plan | Time left tonight, songs that may not fit, a countdown on the singer screen for a song's last 20 seconds. | `pikaraoke/lib/night_plan.py`, `static/js/end-countdown.js` |
 | Desktop or karaoke boot | Boot straight to the screens, or keep the desktop with icons. | `deploy/install-pi.sh --boot` |
 | Guests on cellular (preview) | A Cloudflare Tunnel for guests only; host login never answers on it. | `deploy/files/kidnyce-karaoke-tunnel` |
@@ -51,6 +51,12 @@ launches the app on Ubuntu, macOS and Windows.
 Bundles are numbered by branch: `main` is what runs at gigs, `preview` is where new
 work is tried first. The app version shows it, for example `1.23.0+preview.0.11`, and
 `sudo kidnyce-karaoke status` prints it as `preview v0.11`.
+
+### preview v0.13
+
+- Sound levels are saved 30 seconds after they change, driven by the sound
+  card's change events, instead of a check every 2 minutes. Nothing runs while
+  the levels stay put, and a clean shutdown inside the 30 seconds still saves.
 
 ### preview v0.12
 

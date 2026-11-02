@@ -1,0 +1,36 @@
+# Written by deploy/install-pi.sh. Keeps the sound levels across a power cut:
+# saves them 30 seconds after a change, and once more when it stops.
+[Unit]
+Description=Kid Nyce Karaoke: save the sound card levels after a change
+After=alsa-restore.service sound.target
+ConditionPathExists=/dev/snd
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/kidnyce-karaoke-alsa-watch
+ExecStop=/usr/local/sbin/kidnyce-karaoke-alsa-save
+Restart=always
+RestartSec=30
+# Waits in the kernel almost all the time; never competes with playback.
+Nice=19
+CPUWeight=1
+IOSchedulingClass=idle
+# Root for /dev/snd and /var/lib/alsa, and nothing more.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=-/var/lib/alsa
+RuntimeDirectory=kidnyce-karaoke-alsa
+Environment=ALSA_TMP=/run/kidnyce-karaoke-alsa/asound.state
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+DevicePolicy=closed
+DeviceAllow=char-alsa rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=32M
+
+[Install]
+WantedBy=multi-user.target

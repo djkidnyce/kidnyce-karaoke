@@ -277,8 +277,11 @@ song inside the browser, the device volume sets the jack or card itself. For a m
 input, set the device volume around 80 and ride the gain on the mixer.
 
 Levels you set in `alsamixer` also stay now. Debian only saved them at a clean
-shutdown, so pulling the plug lost them. The Pi now saves them every 2 minutes
-(only when they changed) and restores them at boot. A device volume set in
+shutdown, so pulling the plug lost them. The Pi now saves them 30 seconds after
+you change them, once, however many changes come in that time, and restores them at
+boot. Nothing runs while the levels stay put: `kidnyce-karaoke-alsa-watch` waits on
+the sound card's own change events (`alsactl monitor`) instead of checking on a
+timer, and the file is only written when a level differs. A device volume set in
 Settings wins over `alsamixer` each time the screens start.
 
 The same from a terminal:

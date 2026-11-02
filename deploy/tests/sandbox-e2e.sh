@@ -299,7 +299,7 @@ check "the screens get the sound choice" bash -c "curl -fs 'http://127.0.0.1:$PO
 id kndesk >/dev/null 2>&1 || useradd --create-home kndesk
 SUDO_USER=kndesk "$ROOT/deploy/install-pi.sh" --dry-run --yes --skip-hw-check --no-ddns --dns-provider selfsigned \
     --boot desktop 3>&1 >"$WORK/dry-desktop.out" 2>&1
-check "sound levels are saved every 2 minutes" bash -c "grep -qF 'kidnyce-karaoke-alsa-save.timer' '$WORK/dry-desktop.out' && grep -qF 'enable --now kidnyce-karaoke-alsa-save.timer' '$WORK/dry-desktop.out'"
+check "sound levels are saved after a change, not on a timer" bash -c "grep -qF 'enable --now kidnyce-karaoke-alsa-watch.service' '$WORK/dry-desktop.out' && ! grep -qF 'enable --now kidnyce-karaoke-alsa-save.timer' '$WORK/dry-desktop.out'"
 check "closing the screens has its console menu and desktop helper" bash -c "grep -qF 'kiosk/screens-closed.sh' '$WORK/dry-desktop.out' &&
     grep -qF 'kidnyce-karaoke-desktop-now.path' '$WORK/dry-desktop.out' && grep -qF 'write /etc/tmpfiles.d/kidnyce-karaoke.conf' '$WORK/dry-desktop.out'"
 check "launchers go in the menu and the login autostart" bash -c "grep -qF 'write /usr/share/applications/kidnyce-karaoke-screens.desktop' '$WORK/dry-desktop.out' &&

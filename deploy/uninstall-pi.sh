@@ -22,7 +22,7 @@ units=(kidnyce-karaoke.service kidnyce-karaoke-ddns.timer kidnyce-karaoke-ddns.s
     kidnyce-karaoke-ytdlp.timer kidnyce-karaoke-ytdlp.service kidnyce-karaoke-firewall.service
     kidnyce-karaoke-tunnel.service kidnyce-karaoke-netfallback.service
     kidnyce-karaoke-desktop-now.path kidnyce-karaoke-desktop-now.service
-    kidnyce-karaoke-alsa-save.timer kidnyce-karaoke-alsa-save.service)
+    kidnyce-karaoke-alsa-save.timer kidnyce-karaoke-alsa-save.service kidnyce-karaoke-alsa-watch.service)
 # The tunnel and its DNS record at Cloudflare, while the token is still here.
 if [[ -f $ETC_DIR/tunnel.env && -x /usr/local/sbin/kidnyce-karaoke-tunnel ]]; then
     systemctl stop kidnyce-karaoke-tunnel.service 2>/dev/null || true
@@ -54,7 +54,7 @@ rm -f /usr/share/applications/kidnyce-karaoke-{screens,stop,host}.desktop \
 pkill -u "$KIOSK_USER" 2>/dev/null || true
 rm -f "/home/$KIOSK_USER/.bash_profile"
 rm -f /etc/tmpfiles.d/kidnyce-karaoke.conf /usr/local/sbin/kidnyce-karaoke-desktop-now \
-    /usr/local/sbin/kidnyce-karaoke-alsa-save \
+    /usr/local/sbin/kidnyce-karaoke-alsa-save /usr/local/sbin/kidnyce-karaoke-alsa-watch \
     /etc/NetworkManager/dispatcher.d/90-kidnyce-karaoke
 rm -rf /run/kidnyce-karaoke
 rm -f /usr/local/bin/kidnyce-karaoke /usr/local/sbin/kidnyce-karaoke-ddns \
