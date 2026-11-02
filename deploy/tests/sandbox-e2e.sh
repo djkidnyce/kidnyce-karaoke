@@ -416,6 +416,48 @@ else
     echo "  (skipped: needs CHROME and Xorg with the dummy driver)"
 fi
 
+echo "== Local network only (no Cloudflare token, no domain)"
+# Last, because it changes the install: no Pebble, no DNS, plain http for the
+# venue network at whatever address the machine has.
+if env -u CF_API_TOKEN "$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk --local-only \
+    3>/dev/null >"$WORK/install-local.out" 2>&1; then
+    pass "installs with --local-only and no token"
+else
+    fail "installs with --local-only and no token: $(tail -n 3 "$WORK/install-local.out" | tr '\n' ' ')"
+fi
+check "install.env records local only" grep -qx 'DNS_PROVIDER=none' /etc/kidnyce-karaoke/install.env
+check "the app URL follows the address" grep -q -- '--url http://{ip}' /etc/systemd/system/kidnyce-karaoke.service
+check "no DNS updater" test ! -e /etc/systemd/system/kidnyce-karaoke-ddns.timer
+check "no token kept" test ! -e /etc/kidnyce-karaoke/cloudflare.token
+mapfile -t EXEC < <(sed -n '/^ExecStart=/,/PIKARAOKE_EXTRA_ARGS/p' /etc/systemd/system/kidnyce-karaoke.service |
+    sed 's/^ExecStart=//; s/\\$//; /PIKARAOKE_EXTRA_ARGS/d; /PIKARAOKE_PUBLIC_ARGS/d' | xargs -n1)
+nginx -t -q && nginx -s reload
+restart_app
+LH=(-s -o /dev/null -w '%{http_code}')
+check "http to the Pi's private address serves the join page" test "$(curl "${LH[@]}" -H 'Host: 172.16.0.142' http://127.0.0.1/join)" = 200
+check "a local name is served too" test "$(curl "${LH[@]}" -H 'Host: raspberrypi.local' http://127.0.0.1/join)" = 200
+check "another site's name is dropped (DNS rebinding)" bash -c "! curl -s --max-time 3 -H 'Host: evil.example' http://127.0.0.1/join -o /dev/null"
+check "a public address as Host is dropped" bash -c "! curl -s --max-time 3 -H 'Host: 8.8.8.8' http://127.0.0.1/join -o /dev/null"
+check "https to the address still works, self signed" test "$(curl -k "${LH[@]}" -H 'Host: 172.16.0.142' https://127.0.0.1/join)" = 200
+LJOIN=$(curl -fs "http://127.0.0.1:$PORT/api/display/state" | jq -r .join.join_url || true)
+check "QR code is http://<address>/join/<code> ($LJOIN)" grep -Eq '^http://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/join/[A-Za-z0-9]+$' <<<"$LJOIN"
+LCODE=${LJOIN##*/}
+ljar="$WORK/cookies-local"
+curl -s -c "$ljar" -o /dev/null -D "$WORK/join-local.headers" -H 'Host: 172.16.0.142' "http://127.0.0.1/join/$LCODE" || true
+check "the join cookie works over http (HttpOnly, not Secure)" bash -c "grep -i '^set-cookie:' '$WORK/join-local.headers' | grep -qi httponly && ! grep -i '^set-cookie:' '$WORK/join-local.headers' | grep -qi '; secure'"
+check "joined guest sees the home page over http" test "$(curl "${LH[@]}" -b "$ljar" -H 'Host: 172.16.0.142' http://127.0.0.1/)" = 200
+check "Socket.IO accepts the page's own http origin" test "$(curl "${LH[@]}" -H 'Host: 172.16.0.142' -H 'Origin: http://172.16.0.142' 'http://127.0.0.1/socket.io/?EIO=4&transport=polling')" = 200
+check "Socket.IO refuses another site's page" test "$(curl "${LH[@]}" -H 'Host: 172.16.0.142' -H 'Origin: http://evil.example' 'http://127.0.0.1/socket.io/?EIO=4&transport=polling')" = 400
+check "status says local network only" bash -c "kidnyce-karaoke status 2>&1 | grep -q 'local network only'"
+if env -u CF_API_TOKEN "$ROOT/deploy/install-pi.sh" --yes --skip-hw-check --no-kiosk 3>/dev/null >"$WORK/install-local2.out" 2>&1 &&
+    grep -qx 'DNS_PROVIDER=none' /etc/kidnyce-karaoke/install.env; then
+    pass "a rerun with no options keeps local only"
+else
+    fail "a rerun with no options keeps local only: $(tail -n 3 "$WORK/install-local2.out" | tr '\n' ' ')"
+fi
+check "--tunnel is refused in local only mode" bash -c "! '$ROOT/deploy/install-pi.sh' --dry-run --yes --skip-hw-check --no-kiosk --local-only --tunnel karaoke-test.$ZONE >/dev/null 2>&1"
+check "no token and --yes says how to go local" bash -c "env -u CF_API_TOKEN '$ROOT/deploy/install-pi.sh' --dry-run --yes --skip-hw-check --no-kiosk --dns-provider cloudflare 2>&1 | grep -q -- '--local-only'"
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 echo "Logs: $WORK"

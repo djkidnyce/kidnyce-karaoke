@@ -345,7 +345,7 @@
 					{# MSG: Header of the settings section for the look of the pages on phones and computers. #}
 					<h3 class="m-0">{% trans %}Look{% endtrans %}</h3>
 					{# MSG: One-line summary under the Look heading. #}
-					<span class="section-summary is-size-7 has-text-grey-light">{% trans %}Theme for Home, Queue, Songs, Add New and the host pages{% endtrans %}</span>
+					<span class="section-summary is-size-7 has-text-grey-light">{% trans %}Theme and header logo for Home, Queue, Songs, Add New and the host pages{% endtrans %}</span>
 				</div>
 			</header>
 			<div class="collapsible-content panel is-shadowless mb-0">
@@ -375,6 +375,23 @@
 						<button id="kn-theme-cancel" class="button" type="button" disabled>{% trans %}Cancel preview{% endtrans %}</button>
 					</div>
 				</div>
+				<div class="panel-block px-5 py-3 is-block">
+					{# MSG: Label for the optional logo shown above the navigation on phones and computers. #}
+					<label class="label mb-1" for="kn-logo-file">{% trans %}Header logo (optional){% endtrans %}</label>
+					{# MSG: Explains the header logo upload. #}
+					<p class="is-size-7 has-text-grey-light mb-3">{% trans %}Shown above the navigation on every page, in every theme. PNG, JPEG or WebP, under 1.5 MB. A transparent PNG looks best. Leave it empty for no logo. The TV logo is set under Splash screen.{% endtrans %}</p>
+					<div id="kn-logo-preview" class="mb-3"{% if not header_logo_v %} hidden{% endif %}>
+						<img id="kn-logo-preview-img" alt="" style="max-height: 80px; max-width: 100%;"
+							{% if header_logo_v %}src="{{ url_for('branding.logo', v=header_logo_v) }}"{% endif %}>
+					</div>
+					<div class="is-flex is-flex-wrap-wrap is-align-items-center is-gap-2">
+						<input id="kn-logo-file" type="file" accept="image/png,image/jpeg,image/webp" style="max-width: 100%;">
+						{# MSG: Button that uploads the chosen header logo. #}
+						<button id="kn-logo-upload" class="button is-primary" type="button" disabled>{% trans %}Upload{% endtrans %}</button>
+						{# MSG: Button that removes the header logo. #}
+						<button id="kn-logo-remove" class="button" type="button"{% if not header_logo_v %} disabled{% endif %}>{% trans %}Remove{% endtrans %}</button>
+					</div>
+				</div>
 			</div>
 			<script>
 				(function () {
@@ -398,6 +415,44 @@
 						var card = $(".kn-theme-card").filter(function () { return this.dataset.themeId === saved; })[0];
 						picked = saved;
 						show(saved, card && card.dataset.themeLight === "true");
+					});
+					var logoUrl = "{{ url_for('branding.upload_logo') }}";
+					var logoSrc = "{{ url_for('branding.logo') }}";
+					$("#kn-logo-file").on("change", function () {
+						$("#kn-logo-upload").prop("disabled", !this.files.length);
+					});
+					function logoReply(xhr) {
+						var data = xhr.responseJSON || {};
+						showNotification(data.message || xhr.statusText, data.ok ? "is-success" : "is-danger");
+						return data;
+					}
+					$("#kn-logo-upload").on("click", function () {
+						var file = $("#kn-logo-file")[0].files[0];
+						if (!file) return;
+						var form = new FormData();
+						form.append("logo", file);
+						$.ajax({ url: logoUrl, method: "POST", data: form, processData: false, contentType: false })
+							.always(function (a, status, b) {
+								var data = logoReply(status === "success" ? b : a);
+								if (data.ok) {
+									var src = logoSrc + "?v=" + data.version;
+									$("#kn-logo-preview-img").attr("src", src);
+									$("#kn-logo-preview").prop("hidden", false);
+									$("#kn-logo-remove").prop("disabled", false);
+									$("#kn-logo-file").val("");
+									$("#kn-logo-upload").prop("disabled", true);
+								}
+							});
+					});
+					$("#kn-logo-remove").on("click", function () {
+						$.ajax({ url: logoUrl, method: "DELETE" }).always(function (a, status, b) {
+							var data = logoReply(status === "success" ? b : a);
+							if (data.ok) {
+								$("#kn-logo-preview").prop("hidden", true);
+								$("#kn-logo-preview-img").removeAttr("src");
+								$("#kn-logo-remove").prop("disabled", true);
+							}
+						});
 					});
 					$("#kn-theme-apply").on("click", function () {
 						$.post(changeUrl, { pref: "ui_theme", val: picked }).done(function (data) {

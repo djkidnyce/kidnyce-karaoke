@@ -393,11 +393,39 @@ with sync_playwright() as p:
     other.close()
     phone.goto(f"{SITE}/queue")
     check(
-        "the next page a phone opens carries the theme and the logo plate",
+        "the next page a phone opens carries the theme, with no header logo by default",
         phone.evaluate("document.documentElement.dataset.knTheme") == "social-pulse"
-        and phone.is_visible(".kn-logo-plate img"),
+        and phone.locator(".kn-brandbar").count() == 0,
+    )
+    # The optional header logo: the host uploads one, guests see it, a guest
+    # cannot replace it, an SVG is refused, and Remove takes it away again.
+    logo = (Path(__file__).resolve().parents[2] / "pikaraoke/static/images/logo.png").read_bytes()
+    up = admin_ctx.request.post(
+        f"{SITE}/api/branding/logo",
+        multipart={"logo": {"name": "logo.png", "mimeType": "image/png", "buffer": logo}},
+    )
+    svg = admin_ctx.request.post(
+        f"{SITE}/api/branding/logo",
+        multipart={"logo": {"name": "x.png", "mimeType": "image/png", "buffer": b"<svg/>"}},
+    )
+    guest_try = phone.context.request.delete(f"{SITE}/api/branding/logo", max_redirects=0)
+    phone.goto(f"{SITE}/queue")
+    check(
+        "a header logo uploaded in Settings shows on phones; SVG and guests are refused",
+        up.ok
+        and svg.status == 400
+        and guest_try.status in (302, 401, 403)
+        and phone.is_visible(".kn-header-logo img")
+        and phone.evaluate("document.querySelector('.kn-header-logo img').naturalWidth") > 0,
+        f"upload {up.status} svg {svg.status} guest {guest_try.status}",
     )
     phone.screenshot(path=str(OUT_DIR / "theme-social-pulse.png"), full_page=True)
+    gone = admin_ctx.request.delete(f"{SITE}/api/branding/logo")
+    phone.goto(f"{SITE}/queue")
+    check(
+        "Remove takes the header logo away",
+        gone.ok and phone.locator(".kn-brandbar").count() == 0,
+    )
     admin_ctx.request.post(
         f"{SITE}/api/change_preferences", form={"pref": "ui_theme", "val": "classic"}
     )

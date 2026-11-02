@@ -13,7 +13,12 @@
   const hostAddressText = (host) => {
     if (!host || !host.show) return "";
     if (!host.ip) return noNetwork;
-    // The address works from any phone on this network, with https in front.
+    // The URL already is the address (no domain name, for example --url
+    // http://{ip} on the venue network): show it as is, port and all.
+    let parsed = null;
+    try { parsed = new URL(host.url); } catch (e) { parsed = null; }
+    if (parsed && parsed.hostname === host.ip) return `${parsed.protocol}//${parsed.host}`;
+    // Otherwise the address works from any phone on this network, with https.
     const name = hostOf(host.url);
     const address = `https://${host.ip}`;
     return name && name !== host.ip ? `${address} · ${name}` : address;

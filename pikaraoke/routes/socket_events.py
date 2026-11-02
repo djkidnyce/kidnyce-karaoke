@@ -111,6 +111,12 @@ def kick_guests(socketio) -> None:
     socketio.emit("join_code_changed", namespace="/", to=DISPLAY_ROOM)
 
 
+def announce_address(socketio, url: str) -> None:
+    """Tell the screens the guest address changed (a new network, --url with {ip})."""
+    socketio.emit("join_code_changed", namespace="/", to=DISPLAY_ROOM)
+    socketio.emit("address_changed", {"url": url}, namespace="/", to=DISPLAY_ROOM)
+
+
 def _guard(handler: Callable) -> Callable:
     """Drop an event from a client with no admin session.
 

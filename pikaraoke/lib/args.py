@@ -120,7 +120,9 @@ def parse_pikaraoke_args() -> argparse.Namespace:
     server.add_argument(
         "-u",
         "--url",
-        help="Override the displayed IP address with a supplied URL. This argument should include port, if necessary",
+        help="Override the displayed IP address with a supplied URL. This argument should include port, if necessary. "
+        "{ip} stands for this machine's current address and follows it to a new network, "
+        "for example http://{ip} behind a proxy on port 80.",
         default=None,
         required=False,
     )

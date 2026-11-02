@@ -21,7 +21,7 @@ ExecStart=@@PREFIX@@/venv/bin/pikaraoke \
     --headless \
     --bind-address 127.0.0.1 \
     --port @@PORT@@ \
-    --url https://@@DOMAIN@@ \
+    --url @@APP_URL@@ \
     --require-join-code \
     --download-path @@DATA_DIR@@/songs \
     --intermission-music-path @@DATA_DIR@@/music \

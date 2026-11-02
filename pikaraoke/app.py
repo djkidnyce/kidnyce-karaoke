@@ -22,7 +22,7 @@ from flask_socketio import SocketIO
 
 from pikaraoke import VERSION, karaoke
 from pikaraoke.constants import LANGUAGES
-from pikaraoke.lib import ui_themes
+from pikaraoke.lib import branding, ui_themes
 from pikaraoke.lib.admin_auth import AdminAuth
 from pikaraoke.lib.args import parse_pikaraoke_args
 from pikaraoke.lib.auth import document_auth, install_auth_gate
@@ -38,7 +38,11 @@ from pikaraoke.lib.song_manager import SongManager
 from pikaraoke.lib.url_prefix import BasePathMiddleware
 from pikaraoke.lib.youtube_dl import upgrade_youtubedl
 from pikaraoke.routes import API_BLUEPRINTS, INTERNAL_BLUEPRINTS
-from pikaraoke.routes.socket_events import kick_guests, setup_socket_events
+from pikaraoke.routes.socket_events import (
+    announce_address,
+    kick_guests,
+    setup_socket_events,
+)
 
 _ = flask_babel.gettext
 
@@ -120,6 +124,8 @@ app.jinja_env.globals.update(
     is_admin=is_admin,
     ui_theme=lambda: ui_themes.theme(get_karaoke_instance().preferences.get_or_default("ui_theme")),
     ui_theme_light=lambda: {t.id: t.light for t in ui_themes.THEMES},
+    # The host's own header logo (Settings, Look): a cache buster, or None.
+    header_logo_version=branding.version,
     active_session_name=lambda: get_karaoke_instance().play_history.get_current_session_name(),
     has_active_session=lambda: get_karaoke_instance().play_history.has_active_session(),
 )
@@ -338,6 +344,9 @@ def main() -> None:
         return handler
 
     k.events.on("join_code_changed", lambda: kick_guests(socketio))
+    # --url http://{ip}: the Pi joined another network. The screens redraw the
+    # QR code and the address under it; guests are not kicked, their code holds.
+    k.events.on("address_changed", lambda: announce_address(socketio, k.guest_url()))
     k.events.on("download_started", _broadcast_in_context("download_started"))
     k.events.on("download_stopped", _broadcast_in_context("download_stopped"))
 

@@ -34,6 +34,7 @@ _BASE_TEMPLATE_ENDPOINTS = [
     ("/api/sessions/singers", "sessions_api.get_singers"),
     ("/api/enqueue", "queue_api.enqueue_form"),
     ("/logo", "images.logo"),
+    ("/branding/logo", "branding.logo"),
 ]
 
 

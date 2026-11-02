@@ -31,8 +31,8 @@
 # See deploy/README.md for every option and the Cloudflare token setup.
 set -Eeuo pipefail
 
-INSTALLER_VERSION="1.3.0"
-APP_VERSION="1.23.0+preview.0.10"
+INSTALLER_VERSION="1.4.0"
+APP_VERSION="1.23.0+preview.0.11"
 
 # Deno is what yt-dlp runs YouTube's player code with. Pinned, and checked
 # against the SHA256 published with the release.
@@ -47,6 +47,7 @@ DOMAIN="karaoke.kidnyce.com"
 ZONE=""
 EMAIL=""
 DNS_PROVIDER="cloudflare"
+DNS_SET=0
 CF_TOKEN_FILE=""
 CF_ZONE_ID=""
 DNS_AUTH_HOOK=""
@@ -116,7 +117,11 @@ Options:
   --domain NAME            Hostname guests use (default: $DOMAIN)
   --zone NAME              DNS zone that holds it (default: the domain minus its first label)
   --email ADDRESS          Let's Encrypt account email (optional)
-  --dns-provider NAME      cloudflare (default), route53, hook, manual or selfsigned
+  --dns-provider NAME      cloudflare (default), route53, hook, manual, selfsigned or none
+  --local-only             No domain name and no Cloudflare token: phones join on the venue
+                           network at http://<the Pi's address>, which follows whatever network
+                           the Pi joins. Same as --dns-provider none. Asked for when no token
+                           is given. A rerun keeps it. No tunnel in this mode.
   --cf-token-file PATH     File holding a Cloudflare API token with Zone.DNS Edit on the zone.
                            Also read from \$CF_API_TOKEN, or asked for.
   --cf-zone-id ID          Cloudflare zone id, if the token cannot list zones
@@ -164,7 +169,8 @@ while [[ $# -gt 0 ]]; do
         --domain) DOMAIN=$2; shift ;;
         --zone) ZONE=$2; shift ;;
         --email) EMAIL=$2; shift ;;
-        --dns-provider) DNS_PROVIDER=$2; shift ;;
+        --dns-provider) DNS_PROVIDER=$2; DNS_SET=1; shift ;;
+        --local-only) DNS_PROVIDER=none; DNS_SET=1 ;;
         --cf-token-file) CF_TOKEN_FILE=$2; shift ;;
         --cf-zone-id) CF_ZONE_ID=$2; shift ;;
         --dns-auth-hook) DNS_AUTH_HOOK=$2; shift ;;
@@ -234,7 +240,7 @@ render() {
     local text
     text=$(<"$1")
     local name
-    for name in DOMAIN PORT PREFIX DATA_DIR ETC_DIR APP_USER KIOSK_USER CERT KEY \
+    for name in DOMAIN PORT PREFIX DATA_DIR ETC_DIR APP_USER KIOSK_USER CERT KEY APP_URL \
         LISTEN_HTTP2 HTTP2_DIRECTIVE TUNNEL_HOSTNAME TUNNEL_PORT; do
         text=${text//@@$name@@/${!name:-}}
     done
@@ -245,6 +251,13 @@ render() {
 }
 
 has_systemd() { [[ -d /run/systemd/system ]]; }
+
+# This machine's address on the network it is on now, or fail.
+lan_ip() {
+    local a
+    a=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+    [[ -n $a ]] && echo "$a"
+}
 
 systemctl_do() {
     if has_systemd; then
@@ -275,7 +288,16 @@ preflight() {
     ((BASH_VERSINFO[0] >= 5)) || die "bash 5 or newer is required"
 
     [[ $DOMAIN =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "not a valid hostname: $DOMAIN"
-    case "$DNS_PROVIDER" in cloudflare | route53 | hook | manual | selfsigned) ;; *) die "unknown --dns-provider $DNS_PROVIDER" ;; esac
+    case "$DNS_PROVIDER" in cloudflare | route53 | hook | manual | selfsigned | none) ;; *) die "unknown --dns-provider $DNS_PROVIDER" ;; esac
+    # A rerun keeps local only mode unless a provider is named again.
+    if ((!DNS_SET)) && [[ -f $ETC_DIR/install.env ]] && grep -qx 'DNS_PROVIDER=none' "$ETC_DIR/install.env"; then
+        DNS_PROVIDER=none
+        info "keeping local network only mode (name a --dns-provider to change it)"
+    fi
+    if [[ $DNS_PROVIDER == none ]]; then
+        DDNS=0
+        ((TUNNEL_SET)) && die "--tunnel needs a Cloudflare token and a domain; it does not work with --local-only"
+    fi
     if [[ ! $PORT =~ ^[0-9]+$ ]] || ((PORT <= 1024 || PORT >= 65536)); then
         die "--port must be 1025 to 65535"
     fi
@@ -293,6 +315,8 @@ preflight() {
         TUNNEL_HOSTNAME=$(sed -n 's/^HOSTNAME_PUBLIC=//p' "$ETC_DIR/tunnel.env")
     fi
     ((TUNNEL_OFF)) && TUNNEL_HOSTNAME=""
+    # Local only has no domain to put a tunnel name under; a rerun removes one.
+    [[ $DNS_PROVIDER == none ]] && TUNNEL_HOSTNAME=""
     if [[ -n $TUNNEL_HOSTNAME ]]; then
         [[ $TUNNEL_HOSTNAME =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "--tunnel: not a valid hostname: $TUNNEL_HOSTNAME"
         [[ $TUNNEL_HOSTNAME == *."$ZONE" ]] || die "--tunnel: $TUNNEL_HOSTNAME must be inside the zone $ZONE"
@@ -410,6 +434,7 @@ build_wheel_from_source() {
 # ---------------------------------------------------------------- secrets
 CF_TOKEN=""
 read_cloudflare_token() {
+    [[ $DNS_PROVIDER == none ]] && return 0
     [[ $DNS_PROVIDER == cloudflare || -n $TUNNEL_HOSTNAME || $TUNNEL_OFF == 1 ]] || return 0
     if [[ -n $CF_TOKEN_FILE ]]; then
         [[ -r $CF_TOKEN_FILE ]] || die "cannot read --cf-token-file $CF_TOKEN_FILE"
@@ -420,10 +445,20 @@ read_cloudflare_token() {
         CF_TOKEN=$(<"$ETC_DIR/cloudflare.token")
         info "reusing the saved Cloudflare token"
     elif ((ASSUME_YES)); then
-        die "Cloudflare token needed: --cf-token-file PATH or CF_API_TOKEN (or --dns-provider selfsigned)"
+        die "Cloudflare token needed: --cf-token-file PATH or CF_API_TOKEN. No token? Use --local-only to run on the venue network by the Pi's address."
     else
-        read -r -s -p "    Cloudflare API token (Zone.DNS Edit on $ZONE): " CF_TOKEN </dev/tty
+        info "A Cloudflare token gives phones https://$DOMAIN with a trusted certificate."
+        info "No token? Press Enter to run on the local network only, at http://<the Pi's address>."
+        read -r -s -p "    Cloudflare API token (Zone.DNS Edit on $ZONE), or Enter to skip: " CF_TOKEN </dev/tty
         echo
+        if [[ -z $CF_TOKEN ]]; then
+            [[ $DNS_PROVIDER == cloudflare ]] || die "a token is needed for the tunnel; rerun without --tunnel for local only"
+            DNS_PROVIDER=none
+            DDNS=0
+            TUNNEL_HOSTNAME=""
+            warn "no token: local network only. Rerun with a token any time to add the domain name."
+            return 0
+        fi
     fi
     [[ $CF_TOKEN =~ ^[A-Za-z0-9_-]{20,}$ ]] || die "that does not look like a Cloudflare API token"
 }
@@ -526,8 +561,12 @@ install_app() {
 
 # ---------------------------------------------------------------- 5. app config
 FIRST_PASSWORD=""
+# The address in the QR code. {ip} is filled in by the app with the Pi's
+# current address, and follows it to any network the Pi joins.
+APP_URL=""
 configure_app() {
     step "Configuring the app service"
+    if [[ $DNS_PROVIDER == none ]]; then APP_URL="http://{ip}"; else APP_URL="https://$DOMAIN"; fi
     CERT=${CERT:-/etc/letsencrypt/live/$CERT_NAME/fullchain.pem}
     KEY=${KEY:-/etc/letsencrypt/live/$CERT_NAME/privkey.pem}
 
@@ -544,6 +583,7 @@ KEY=$KEY
 KIOSK=$KIOSK
 KIOSK_USER=$KIOSK_USER
 DNS_PROVIDER=$DNS_PROVIDER
+APP_URL=$APP_URL
 VERSION=$APP_VERSION
 EOF
     if [[ ! -f $ETC_DIR/app.env ]]; then
@@ -610,6 +650,14 @@ self_signed_cert() {
 }
 
 obtain_certificate() {
+    if [[ $DNS_PROVIDER == none ]]; then
+        # Phones use plain http on the venue network. The certificate only
+        # serves anyone who types https://<address> anyway (one warning).
+        step "Local network only: no domain, no Let's Encrypt"
+        self_signed_cert
+        CERT_KIND="none needed: phones use http on the venue network"
+        return
+    fi
     step "Getting a TLS certificate for $DOMAIN"
     if [[ $DNS_PROVIDER == selfsigned ]]; then
         self_signed_cert
@@ -722,7 +770,9 @@ configure_nginx() {
         strip_v6=(grep -v 'listen \[::\]')
         info "IPv6 is off on this machine, listening on IPv4 only"
     fi
-    render "$SCRIPT_DIR/files/nginx-site.conf" | "${strip_v6[@]}" | write_file 644 root:root /etc/nginx/sites-available/kidnyce-karaoke.conf
+    local site=nginx-site.conf
+    [[ $DNS_PROVIDER == none ]] && site=nginx-site-local.conf
+    render "$SCRIPT_DIR/files/$site" | "${strip_v6[@]}" | write_file 644 root:root /etc/nginx/sites-available/kidnyce-karaoke.conf
     run ln -sfn /etc/nginx/sites-available/kidnyce-karaoke.conf /etc/nginx/sites-enabled/kidnyce-karaoke.conf
     # Debian's default site also claims default_server on port 80.
     if [[ -L /etc/nginx/sites-enabled/default ]]; then
@@ -737,7 +787,17 @@ configure_nginx() {
 
 # ---------------------------------------------------------------- 8. ddns
 configure_ddns() {
-    ((DDNS)) || return 0
+    if ((!DDNS)); then
+        # Switched to local only (or --no-ddns): stop pointing a name at this Pi.
+        if [[ -f /etc/systemd/system/kidnyce-karaoke-ddns.timer ]]; then
+            systemctl_do disable --now kidnyce-karaoke-ddns.timer
+            run rm -f /etc/systemd/system/kidnyce-karaoke-ddns.timer /etc/systemd/system/kidnyce-karaoke-ddns.service \
+                /etc/NetworkManager/dispatcher.d/90-kidnyce-karaoke
+            systemctl_do daemon-reload
+            info "stopped updating the DNS record"
+        fi
+        return 0
+    fi
     step "Keeping $DOMAIN pointed at this Pi (Cloudflare DNS)"
     printf '%s\n' "$CF_TOKEN" | write_file 600 root:root "$ETC_DIR/cloudflare.token"
     write_file 644 root:root "$ETC_DIR/ddns.env" <<EOF
@@ -763,6 +823,13 @@ EOF
             warn "could not update the DNS record now; the timer retries every 5 minutes"
         fi
     fi
+}
+
+# Local only keeps no Cloudflare secret at all. Runs after configure_tunnel,
+# which still needs the token to delete a tunnel left from an earlier install.
+forget_cloudflare_token() {
+    [[ $DNS_PROVIDER == none ]] || return 0
+    run rm -f "$ETC_DIR/cloudflare.token" /etc/letsencrypt/kidnyce-cloudflare.ini
 }
 
 # ---------------------------------------------------------------- 8b. tunnel
@@ -1060,7 +1127,13 @@ start_services() {
     done
     ((i < 90)) || die "the app did not start. See: journalctl -u kidnyce-karaoke -n 100"
     ok "app is up"
-    if curl -fsS --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null 2>&1; then
+    if [[ $DNS_PROVIDER == none ]]; then
+        if curl -fsS --noproxy '*' --max-time 5 "http://127.0.0.1/api/healthz" >/dev/null; then
+            ok "http://$(lan_ip || echo '<address>') answers on the venue network"
+        else
+            die "Nginx is not serving the venue network on port 80. See: sudo nginx -t; sudo tail /var/log/nginx/error.log"
+        fi
+    elif curl -fsS --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null 2>&1; then
         ok "https://$DOMAIN answers with a trusted certificate"
     elif curl -fsSk --noproxy '*' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/healthz" >/dev/null; then
         ok "https://$DOMAIN answers (certificate: $CERT_KIND)"
@@ -1106,7 +1179,12 @@ summary() {
     else
         printf '\n%s==== Kid Nyce Karaoke is installed ====%s\n' "$C_BOLD" "$C_OFF"
     fi
-    echo "  Guests:        https://$DOMAIN  (scan the QR code on the crowd screen)"
+    if [[ $DNS_PROVIDER == none ]]; then
+        echo "  Guests:        http://$(lan_ip || echo '<the Pi address>')  (local network only; scan the QR code on the crowd screen)"
+        echo "                 The address follows the Pi to any network. Add a domain later: rerun with a Cloudflare token."
+    else
+        echo "  Guests:        https://$DOMAIN  (scan the QR code on the crowd screen)"
+    fi
     if [[ -n $TUNNEL_HOSTNAME ]]; then
         echo "  Internet:      https://$TUNNEL_HOSTNAME  (guests on cellular; Settings, Join code puts it in the QR code)"
     fi
@@ -1157,6 +1235,7 @@ main() {
     configure_nginx
     configure_ddns
     configure_tunnel
+    forget_cloudflare_token
     configure_firewall
     configure_kiosk
     configure_timers

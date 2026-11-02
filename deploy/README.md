@@ -13,7 +13,7 @@ to venue.
 | Official 5V 3A USB C supply | Undervoltage throttles the CPU and drops video frames. |
 | microSD (32 GB or more, A2) or USB SSD | Songs live on it. An SSD is faster and lasts longer. |
 | One or two micro HDMI to HDMI cables | With two TVs, HDMI0 (next to USB C) is the singer screen and HDMI1 the room screen. With one TV, either port shows everything. |
-| Cloudflare account with `kidnyce.com` | For the certificate and the DNS record. See below. |
+| Cloudflare account with `kidnyce.com` | For the certificate and the DNS record. See below. Optional: without one, see "No domain: local network only". |
 | Optional: USB audio interface | Cleaner than the 3.5 mm jack for feeding your mixer. |
 
 ## 1. Cloudflare (once)
@@ -33,7 +33,42 @@ pointed at the Pi's address on whatever network it joins.
 That token can edit every record in `kidnyce.com`. Keep the file `600`, never commit
 it, and revoke it from the Cloudflare dashboard if the Pi is ever lost.
 
-If your DNS is somewhere else, see "Other DNS hosts" at the end.
+If your DNS is somewhere else, see "Other DNS hosts" at the end. No domain or no
+Cloudflare account at all: skip this step and see "No domain: local network only".
+
+## No domain: local network only
+
+Everything works without a domain name or a Cloudflare token. Phones join on the
+venue network at the Pi's own address, such as `http://172.16.0.142`, and the QR
+code carries that address. When the Pi joins another network the QR code and the
+address on the screens follow it within about 30 seconds.
+
+```sh
+sudo ./deploy/install-pi.sh --local-only
+```
+
+Run the installer with no token and it asks: press Enter at the token prompt for
+the same result. With `--yes` and no token it stops and names `--local-only`, so an
+unattended install never picks a mode you did not ask for. A rerun keeps local only;
+rerun with `--cf-token-file` to add the domain later. `--tunnel` is refused in this
+mode, since the tunnel needs the domain.
+
+| | With a domain (default) | Local network only |
+| --- | --- | --- |
+| Guests type | `https://karaoke.kidnyce.com` | `http://<the Pi's address>` |
+| Certificate | Let's Encrypt, trusted | none needed; `https://<address>` still answers with a self signed one (one warning) |
+| Cloudflare token | needed | not used, none kept on the Pi |
+| DNS record | follows the Pi | none |
+| Internet guests (tunnel) | optional preview | not available |
+| Join code, rate limits, firewall | yes | yes |
+
+Threat model: plain http means anyone on the same network can read the traffic,
+the admin password included when the host logs in from a phone. On a venue WiFi
+shared with strangers, log in as host from the Pi itself (Karaoke Host on the
+desktop) or from a network you trust, or add a domain. Nginx answers only private
+addresses and local names (`raspberrypi`, `raspberrypi.local`), so a public site that
+points its name at the Pi (DNS rebinding) is dropped. The app still listens on
+loopback only, and the firewall still allows only private ranges.
 
 ## 2. Flash the Pi
 
@@ -130,9 +165,16 @@ Settings, Look offers six looks for the pages on phones and computers: Classic (
 original), Club Console, Daylight, Broadcast, Vinyl Lounge and Social Pulse. Tap one
 to preview it on the Settings page, then **Apply**: it is saved on the Pi for
 everyone, and every open page switches at once. Home, Queue, Songs, Add New and the
-host pages all follow it; the TV screens keep their own look. Every theme but
-Classic shows your logo above the navigation, on a white plate so the record and the
-grey letters stay readable on dark and light themes alike.
+host pages all follow it; the TV screens keep their own look.
+
+**Header logo (optional).** Settings, Look, Header logo: choose a PNG, JPEG or WebP
+under 1.5 MB and tap **Upload**. It shows above the navigation on every page, in
+every theme, Classic too. **Remove** takes it away; with none uploaded the pages
+start at the navigation bar. A transparent PNG looks best, since it sits right on the
+theme's background with no plate behind it. The file is checked by its content, not
+its name, and SVG is refused because it can carry script. It is kept in the data
+folder (`/var/lib/kidnyce-karaoke/.pikaraoke/branding` on the Pi), so updates keep
+it. The TV logo is separate: Settings, Splash screen.
 
 ## Getting out of the screens
 
@@ -586,7 +628,7 @@ when it has none. Turn it off under Settings, Splash screen.
 | App | `/opt/kidnyce-karaoke/venv`, service `kidnyce-karaoke` | Runs as user `pikaraoke`, loopback only, systemd sandboxing, hash pinned dependencies. |
 | Data | `/var/lib/kidnyce-karaoke` | Songs, break music, config, SQLite database. |
 | Config | `/etc/kidnyce-karaoke` | `install.env`, `app.env` (extra flags), `kiosk.env` (screens), secrets (mode 600). |
-| Nginx | `/etc/nginx/sites-available/kidnyce-karaoke.conf` | TLS 1.2/1.3, HSTS, CSP, rate limits, unknown hosts dropped. |
+| Nginx | `/etc/nginx/sites-available/kidnyce-karaoke.conf` | TLS 1.2/1.3, HSTS, CSP, rate limits, unknown hosts dropped. With `--local-only`, from `nginx-site-local.conf`: http on port 80 for private addresses and local names only. |
 | Certificate | `/etc/letsencrypt/live/kidnyce-karaoke/` | ECDSA on the NIST P256 curve, renewed by `certbot.timer`, Nginx reloaded after renewal. |
 | DNS record | `kidnyce-karaoke-ddns.timer` | Every 5 minutes; only ever publishes a private address. |
 | Firewall | `kidnyce-karaoke-firewall.service`, table `inet kidnyce_fw` | Inbound 80/443/22 from private ranges only. |
@@ -607,6 +649,8 @@ add `--purge` to delete those too.
 - **No API at all:** `--dns-provider manual` asks you to add a TXT record by hand. You
   repeat that before every renewal (about every 60 days), so it is only good for trials.
 - **Lab only:** `--dns-provider selfsigned`. Phones show a warning.
+- **No DNS at all:** `--local-only` (or `--dns-provider none`). See "No domain: local
+  network only".
 
 ## Tests
 

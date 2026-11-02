@@ -10,9 +10,13 @@ describe("host address", () => {
     expect(hostAddressText({ show: true, ip: "192.168.6.186", url: "https://karaoke.kidnyce.com" }))
       .toBe("https://192.168.6.186 · karaoke.kidnyce.com");
   });
-  it("shows the address alone when there is no name", () => {
+  it("shows the URL as is when it already is the address", () => {
     expect(hostAddressText({ show: true, ip: "192.168.6.186", url: "http://192.168.6.186:5555" }))
-      .toBe("https://192.168.6.186 · 192.168.6.186:5555");
+      .toBe("http://192.168.6.186:5555");
+    expect(hostAddressText({ show: true, ip: "172.16.0.142", url: "http://172.16.0.142" }))
+      .toBe("http://172.16.0.142");
+  });
+  it("shows the address alone when there is no name", () => {
     expect(hostAddressText({ show: true, ip: "10.0.0.5", url: "" })).toBe("https://10.0.0.5");
   });
   it("says so when there is no network", () => {

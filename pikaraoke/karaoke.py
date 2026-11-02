@@ -55,6 +55,11 @@ from pikaraoke.version import __version__ as VERSION
 
 # How often the idle run loop looks for last night's session to close.
 STALE_CHECK_SECONDS = 600
+# With --url http://{ip}, how often to look for a new address (a new network).
+ADDRESS_CHECK_SECONDS = 30
+# Stands for the machine's current address in --url, for installs without a
+# domain name: the QR code and the screens follow whatever network it joins.
+IP_PLACEHOLDER = "{ip}"
 
 
 class SongInUseError(Exception):
@@ -429,6 +434,7 @@ class Karaoke:
         # guests scan a code the first song keeps rather than replaces.
         self.play_history.end_stale_session()
         self._next_stale_check = time.monotonic() + STALE_CHECK_SECONDS
+        self._next_address_check = time.monotonic() + ADDRESS_CHECK_SECONDS
         self.join_codes = JoinCodeManager(
             self.db,
             self.events,
@@ -475,6 +481,44 @@ class Karaoke:
         self._next_stale_check = now + STALE_CHECK_SECONDS
         if not self.queue_manager.queue and not self.playback_controller.is_playing:
             self.play_history.end_stale_session()
+
+    def _current_ip(self) -> str:
+        """The address get_url() would pick now, without its start up retries."""
+        if self.is_raspberry_pi:
+            try:
+                out = subprocess.check_output(["hostname", "-I"], timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            first = out.decode("utf-8", "ignore").split()
+            return first[0] if first else ""
+        return get_ip(self.platform)
+
+    def follows_address(self) -> bool:
+        """True when --url carries {ip}: the address is the network's, not a name."""
+        return bool(self.url_override) and IP_PLACEHOLDER in self.url_override
+
+    def _follow_address(self) -> None:
+        """Keep the URL, QR code and screens on the address of the network joined now.
+
+        Only with --url http://{ip}. Cheap: one look at the interfaces every
+        ADDRESS_CHECK_SECONDS, and nothing else unless the address changed.
+        """
+        if not self.follows_address():
+            return
+        now = time.monotonic()
+        if now < self._next_address_check:
+            return
+        self._next_address_check = now + ADDRESS_CHECK_SECONDS
+        ip = self._current_ip()
+        if not ip or ip.startswith("127.") or ip == self.ip:
+            return
+        logging.info(f"Network address changed from {self.ip} to {ip}")
+        self.ip = ip
+        self.url = append_base_path_to_url(
+            self.url_override.replace(IP_PLACEHOLDER, ip), self.url_base_path
+        )
+        self.generate_qr_code()
+        self.events.emit("address_changed")
 
     def get_intermission_music_path(self) -> str | None:
         """The break music folder: its own setting, else the background music folder."""
@@ -589,7 +633,7 @@ class Karaoke:
 
         if self.url_override != None:
             logging.debug("Overriding URL with " + self.url_override)
-            url = self.url_override
+            url = self.url_override.replace(IP_PLACEHOLDER, self.ip)
         else:
             if self.prefer_hostname:
                 url = f"http://{socket.getfqdn().lower()}:{self.port}"
@@ -940,6 +984,7 @@ class Karaoke:
                 self.playback_controller.end_if_overran()
                 self.playback_controller.log_output()
                 self._end_stale_session_when_idle()
+                self._follow_address()
                 self.handle_run_loop()
             except KeyboardInterrupt:
                 logging.warning("Keyboard interrupt: Exiting pikaraoke...")

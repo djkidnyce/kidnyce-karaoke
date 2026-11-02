@@ -21,6 +21,7 @@ EXPECTED_PUBLIC_ENDPOINTS = {
     "files.browse",
     "home.home",
     "images.logo",
+    "branding.logo",
     "images.qrcode",
     "info.info",
     "now_playing.now_playing",

@@ -479,14 +479,16 @@
 
   {% if not blank_page %}
   <div class="container" style="padding: 5px; max-width: 900px;">
-    {# Your logo above the navigation in every theme but Classic. #}
+    {# The host's own logo above the navigation, only once one is uploaded in
+       Settings, Look. With none, the page starts at the navigation bar. #}
+    {% set kn_logo_v = header_logo_version() if header_logo_version is defined else none %}
+    {% if kn_logo_v %}
     <div class="kn-brandbar">
-      <a class="kn-logo-plate" href="{{ url_for('home.home') }}">
-        <img src="{{ url_for('images.logo') }}" alt="{{ site_title }}">
+      <a class="kn-header-logo" href="{{ url_for('home.home') }}">
+        <img src="{{ url_for('branding.logo', v=kn_logo_v) }}" alt="{{ site_title }}">
       </a>
-      {# MSG: Small tag beside the logo above the navigation. #}
-      <span class="kn-brand-tag">{% trans %}Karaoke{% endtrans %}</span>
     </div>
+    {% endif %}
     <nav class="navbar is-primary" role="navigation" aria-label="main navigation">
       <div class="navbar-brand ml-0" id="brand">
         <a id="home" class="navbar-item" href="{{ url_for('home.home') }}">

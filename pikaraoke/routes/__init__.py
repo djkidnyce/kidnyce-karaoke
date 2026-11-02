@@ -9,6 +9,7 @@ from pikaraoke.routes.admin import admin_bp
 from pikaraoke.routes.auth_api import auth_api_bp
 from pikaraoke.routes.background_music import background_music_bp
 from pikaraoke.routes.batch_song_renamer import batch_song_renamer_bp
+from pikaraoke.routes.branding import branding_bp
 from pikaraoke.routes.charts import charts_bp
 from pikaraoke.routes.controller import controller_bp
 from pikaraoke.routes.display import display_bp
@@ -64,9 +65,10 @@ INTERNAL_BLUEPRINTS = [
     settings_bp,
     splash_bp,
     batch_song_renamer_bp,
-    # Kid Nyce additions: join gate, crowd screen, break music, charts.
+    # Kid Nyce additions: join gate, crowd screen, break music, charts, logo.
     join_bp,
     display_bp,
     intermission_bp,
     charts_bp,
+    branding_bp,
 ]

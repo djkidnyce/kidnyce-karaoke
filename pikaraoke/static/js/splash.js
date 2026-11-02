@@ -765,6 +765,10 @@ const setupSocketEvents = () => {
   });
   socket.on("now_playing", handleNowPlayingUpdate);
   socket.on("join_code_changed", () => { refreshQrCode(); refreshAllInOne(); });
+  // Kid Nyce: the Pi joined another network (--url with {ip}). Text, not HTML.
+  socket.on("address_changed", (data) => {
+    if (data && data.url) $("#splash-url-text").text(`\u00a0${data.url}`);
+  });
   socket.on("queue_update", refreshAllInOne);
   socket.on("preferences_update", applyPreferenceUpdate);
   socket.on("preferences_reset", applyPreferencesReset);

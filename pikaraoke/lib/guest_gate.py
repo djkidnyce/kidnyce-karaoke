@@ -37,6 +37,7 @@ OPEN_ENDPOINTS = frozenset(
         "auth_api.auth_status",
         "auth_api.login",
         "images.logo",
+        "branding.logo",
     }
 )
 

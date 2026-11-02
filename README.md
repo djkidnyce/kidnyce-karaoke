@@ -16,6 +16,13 @@ phones.
 | Break music | Songs between singers, planned to fit the break length you set. |
 | Charts | Most requested songs, tonight and all time, and every Billboard Hot 100 number one. |
 | Secure by default | Let's Encrypt by DNS challenge, Nginx with TLS 1.2 and 1.3, a firewall that only allows the local network, a sandboxed service. |
+| No domain needed | `--local-only` runs on the venue network at the Pi's own address, no Cloudflare token. The QR code follows the Pi to any network. |
+| Your look | Six themes for the phone and host pages, and an optional header logo, both in Settings, Look. |
+
+Runs on a Raspberry Pi 4 (4 GB or 8 GB is the main target; a Pi 5 works the same and
+a Pi 3 works overclocked). The app alone also runs on Linux, macOS and Windows, as
+upstream does. Details, release notes and how upstream updates come in:
+[docs/kidnyce-changes.md](docs/kidnyce-changes.md).
 
 ## Install on the Pi
 
@@ -26,6 +33,7 @@ cd kidnyce-karaoke
 sudo ./deploy/install-pi.sh --cf-token-file ~/cloudflare.token
 ```
 
+No domain or Cloudflare account? Use `sudo ./deploy/install-pi.sh --local-only`.
 The full guide, Cloudflare setup included, is in [deploy/README.md](deploy/README.md).
 
 ## Upstream

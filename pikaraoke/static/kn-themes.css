@@ -78,34 +78,24 @@ html[data-kn-theme]:not([data-kn-theme="classic"]) :focus-visible {
   outline-offset: 2px;
 }
 
-/* Your logo, on a white plate: it was drawn on white, so its black record and
-   light grey letters stay readable on every theme, light or dark. */
-.kn-brandbar { display: none; }
-html[data-kn-theme]:not([data-kn-theme="classic"]) .kn-brandbar {
+/* The host's optional header logo (Settings, Look). Shown in every theme,
+   Classic too, and only when one was uploaded. No plate behind it: the image
+   is drawn as uploaded, so a transparent PNG sits on the theme's background. */
+.kn-brandbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 4px 12px;
+  justify-content: center;
+  padding: 8px 4px 10px;
 }
-.kn-logo-plate {
-  display: inline-flex;
-  align-items: center;
-  background: #fff;
-  border-radius: 12px;
-  padding: 4px 10px;
-  box-shadow: 0 0 0 1px var(--t-line), 0 6px 18px rgb(0 0 0 / 18%);
-}
-.kn-logo-plate img { display: block; height: 104px; width: auto; }
-.kn-brand-tag {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--t-muted);
+.kn-header-logo img {
+  display: block;
+  max-height: 96px;
+  max-width: 100%;
+  width: auto;
+  height: auto;
 }
 @media (max-width: 480px) {
-  .kn-logo-plate img { height: 72px; }
+  .kn-header-logo img { max-height: 64px; }
 }
 
 /* Navigation */
