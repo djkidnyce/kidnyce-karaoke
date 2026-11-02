@@ -7,7 +7,6 @@
   rel="stylesheet"
   href="{{  url_for('static', filename='score.css') }}"
 />
-<script src="{{ url_for('static', filename='js/subtitles-octopus.js') }}"></script>
 <script>
   // Use this config object to pass data from the jinja2 template to the splash.js code
   const PikaraokeConfig = {
@@ -37,7 +36,6 @@
 <script src="{{ url_for('static', filename='js/host-address.js') }}" data-no-network="{{ _('No network') }}"></script>
 {% endblock %} {% block body %}
 <div id="top-container" class="overlay">
-<i class="icon icon-mic-1 is-invisible" style="position: absolute" title="Current singer"></i>
   <div
     id="now-playing"
     class="has-text-warning stroke is-size-4 has-text-right"
@@ -49,13 +47,13 @@
       style="margin-bottom: 5px"
     ></p>
     <div class="has-text-success">
-		</span><i class="icon icon-mic-1" title="Current singer"></i>
+      <span class="icon is-text-size mr-1"><i class="ph ph-microphone-stage" title="Current singer"></i></span>
       <span id="now-playing-singer"></span>
-		<br />
-		<span class="timestamp is-size-6">
+      <br />
+      <span class="timestamp is-size-6">
         <span id="current">00:00</span>
-		  <span id="duration">/00:00</span>
-		</span>
+        <span id="duration">/00:00</span>
+      </span>
     </div>
   </div>
 </div>
@@ -114,7 +112,7 @@
       <b class="has-text-white"
         >{# MSG: Label for the next singer in the queue. #}
         {% trans %}Next singer:{% endtrans %} </b
-      >&nbsp;<i class="icon icon-mic-1" title="Next singer"></i
+      >&nbsp;<span class="icon is-text-size mr-1"><i class="ph ph-microphone-stage" title="Next singer"></i></span
       ><span id="up-next-singer"></span>
     </div>
   </div>

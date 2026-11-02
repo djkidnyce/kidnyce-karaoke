@@ -216,9 +216,7 @@ beforeAll(async () => {
   window.addToast = ($stack, message, categoryClass, { timeout = 3000, closeable = true } = {}) => {
     const $toast = $('<div class="notification mb-0"></div>').addClass(categoryClass);
     if (closeable) {
-      $toast
-        .addClass("base-notification")
-        .append($('<button class="delete" aria-label="close"></button>'));
+      $toast.append($('<button class="delete" aria-label="close"></button>'));
     }
     $toast.append($('<div class="flash"></div>').text(message));
     $stack.append($toast);
@@ -342,6 +340,8 @@ beforeEach(() => {
   s.isMaster = false;
   s.currentPlaybackId = null;
   s.currentVideoUrl = null;
+  s.currentSubtitleUrl = null;
+  s.octopusInstance = null;
   s.nowPlaying = {};
   s.autoplayConfirmed = false;
   s.bgPlaylist = [];

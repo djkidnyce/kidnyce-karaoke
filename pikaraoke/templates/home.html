@@ -56,14 +56,18 @@
 	});
 
 	function handleNowPlaying(np) {
-		console.log(np);
 		renderBreakStatus(np.intermission);
 		pikaWaiting = !np.now_playing && !!np.up_next && !np.autoplay;
 		pikaWaitingSong = np.up_next_file;
+
+		// Autoplay's ~2s gap between songs; keep the controls up through it so
+		// they don't vanish and jump the page.
+		var autoplayGap = !np.now_playing && !!np.up_next && np.autoplay;
+
 		if (np.now_playing) {
 			// Escaped: titles and singer names are typed on guests' phones.
 			var nowPlayingHtml = `<p class="mb-1">${escapeHtml(np.now_playing)}</p>
-          <p class="has-text-text mb-1"><i class="icon icon-mic-1" title="Current singer"></i>${escapeHtml(np.now_playing_user)}</p>`;
+          <p class="has-text-text mb-1"><span class="icon is-text-size mr-1"><i class="ph ph-microphone-stage" title="Current singer"></i></span>${escapeHtml(np.now_playing_user)}</p>`;
 
 			if (np.now_playing_transpose != 0) {
 				nowPlayingHtml +=
@@ -74,12 +78,9 @@
 			}
 
 			$("#now-playing").html(nowPlayingHtml);
-			$(".control-box").show();
 		} else {
 			// {# MSG: Message which shows in the "Now Playing" section when there is no song currently playing #}
 			$("#now-playing").html({{ _('Nothing is playing right now.') | tojson }});
-			// A song waiting for a manual start keeps the control box up.
-			$(".control-box").toggle(pikaWaiting);
 		}
 
 		// The now-playing marker shows only while a song is loaded, not during a
@@ -90,11 +91,15 @@
 			$("#up-next").html(`<p class="mb-1">${escapeHtml(np.up_next)}</p>
           <p class="has-text-text">
             {# MSG: Title text for the icon marking the next person to sing. #}
-            <i class="icon icon-mic-1" title="{{ _('Next singer') | forceescape }}"></i>${escapeHtml(np.next_user)}</p>`);
+            <span class="icon is-text-size mr-1"><i class="ph ph-microphone-stage" title="{{ _('Next singer') | forceescape }}"></i></span>${escapeHtml(np.next_user)}</p>`);
 		} else {
 			// {# MSG: Alternative text for the "Up next" section if no more songs are queued up. #}
 			$("#up-next").html({{ _('No song is queued.') | tojson }});
 		}
+
+		// Up while playing or queued; inert (dimmed) through the autoplay gap.
+		$(".control-box").toggle(!!np.now_playing || !!np.up_next);
+		$(".control-box").toggleClass("is-inert", autoplayGap);
 
 		// While waiting, the slider reflects and sets the upcoming song's key.
 		var shownTranspose = pikaWaiting ? np.up_next_transpose : np.now_playing_transpose;
@@ -111,12 +116,12 @@
 		// Not playing (paused or a song waiting to start): the button plays
 		// rather than pauses, and the gif stays still.
 		if (!window.isNowPlaying(np)) {
-			$("#pause-resume").removeClass("icon-pause");
-			$("#pause-resume").addClass("icon-play");
+			$("#pause-resume").removeClass("ph-pause");
+			$("#pause-resume").addClass("ph-play");
 			$(".playing_gif").attr("src", "{{  url_for('static', filename='images/now-playing.png') }}");
 		} else {
-			$("#pause-resume").removeClass("icon-play");
-			$("#pause-resume").addClass("icon-pause");
+			$("#pause-resume").removeClass("ph-play");
+			$("#pause-resume").addClass("ph-pause");
 			$(".playing_gif").attr("src", "{{  url_for('static', filename='images/now-playing.gif') }}");
 		}
 	}
@@ -144,15 +149,23 @@
 
 		$("#submit-transpose").click(function () {
 			var value = slider ? slider.value : 0;
+			function notifyKeyChanged() {
+				showNotification(
+					window.translations.keyChanged.replace("{label}", getSemitonesLabel(value)),
+					"is-success"
+				);
+			}
 			if (pikaWaiting) {
 				// Pre-set the waiting song's key; no playing song to restart, so no confirm.
 				$.post(window.pikaraokeConfig.basePath + "/api/queue/pitch?song="
-					+ encodeURIComponent(pikaWaitingSong) + "&semitones=" + value);
+					+ encodeURIComponent(pikaWaitingSong) + "&semitones=" + value)
+					.done(notifyKeyChanged);
 				return;
 			}
 			r = confirm(window.translations.confirmTranspose.replace("{label}", getSemitonesLabel(value)));
 			if (r) {
-				$.post(window.pikaraokeConfig.basePath + "/api/transpose/" + value);
+				$.post(window.pikaraokeConfig.basePath + "/api/transpose/" + value)
+					.done(notifyKeyChanged);
 			}
 			slider.value = 0;
 			output.innerHTML = getSemitonesLabel(slider.value);
@@ -191,6 +204,12 @@
 		});
 
 		$("#skip").click(function () {
+			if (pikaWaiting) {
+				// A waiting song has not played, so skipping it just drops it with
+				// no confirm; the server removes it from the queue and toasts.
+				$.post(window.pikaraokeConfig.basePath + "/api/skip");
+				return;
+			}
 			r = confirm(
 				// {# MSG: Confirmation message when clicking a button to skip a track. #}
 				{{ _("Are you sure you want to skip this track? If you didn't add this song, ask permission first!") | tojson }}
@@ -209,12 +228,12 @@
 		});
 
 		function togglePausePlayButton() {
-			if ($("#pause-resume").hasClass("icon-pause")) {
-				$("#pause-resume").removeClass("icon-pause");
-				$("#pause-resume").addClass("icon-play");
+			if ($("#pause-resume").hasClass("ph-pause")) {
+				$("#pause-resume").removeClass("ph-pause");
+				$("#pause-resume").addClass("ph-play");
 			} else {
-				$("#pause-resume").removeClass("icon-play");
-				$("#pause-resume").addClass("icon-pause");
+				$("#pause-resume").removeClass("ph-play");
+				$("#pause-resume").addClass("ph-pause");
 			}
 		}
 
@@ -247,7 +266,7 @@
 				var escaped = $('<span>').text(dev.label).html();
 				list.append(
 					'<div class="is-flex is-align-items-center mb-1">' +
-						'<i class="icon icon-mic-1 mr-1"></i>' +
+						'<span class="icon mr-1"><i class="ph ph-microphone-stage"></i></span>' +
 						'<span class="is-size-7 mr-2 is-truncated" style="min-width: 80px;">' + escaped + '</span>' +
 						'<input type="range" min="0" max="1" step="0.05" value="' + dev.volume + '" ' +
 							'class="mic-live-volume" data-device-id="' + dev.deviceId + '" data-label="' + escaped + '" ' +
@@ -310,14 +329,14 @@
 	<div class="is-size-3 is-flex is-justify-content-space-between">
 		<div class="is-size-3">
 			{# MSG: Title attribute on the button to restart the current song. #}
-			<a title="{{ _('Restart Song') }}" id="restart"><i class="icon icon-to-start"></i> </a>&nbsp;&nbsp; {# MSG:
+			<a title="{{ _('Restart Song') }}" id="restart"><span class="icon is-text-size"><i class="ph ph-skip-back"></i></span> </a>&nbsp;&nbsp; {# MSG:
 			Title attribute on the button to play or pause the current song. #}
-			<a title="{{ _('Play/Pause') }}"><i id="pause-resume" class="icon icon-pause"></i> </a>&nbsp;&nbsp; {# MSG:
+			<a title="{{ _('Play/Pause') }}"><span class="icon is-text-size"><i id="pause-resume" class="ph ph-pause"></i></span> </a>&nbsp;&nbsp; {# MSG:
 			Title attribute on the button to skip to the next song. #}
-			<a title="{{ _('Stop Current Song') }}" id="skip"><i class="icon icon-to-end"></i> </a>
+			<a title="{{ _('Stop Current Song') }}" id="skip"><span class="icon is-text-size"><i class="ph ph-skip-forward"></i></span> </a>
 		</div>
 		<div class="is-size-3 is-flex is-align-items-center">
-			<i id="vol-down" class="icon icon-volume-down"></i>
+			<span class="icon is-text-size"><i id="vol-down" class="ph ph-speaker-low"></i></span>
 			<input
 				type="range"
 				min="0"
@@ -327,23 +346,21 @@
 				id="volume-slider"
 				style="margin: 0 8px 0px 5px; width: 100px"
 			/>
-			<i id="vol-up" class="icon icon-volume-up"></i>
+			<span class="icon is-text-size"><i id="vol-up" class="ph ph-speaker-high"></i></span>
 		</div>
 	</div>
 	<hr />
 
 	{% if is_transpose_enabled %}
-	<div class="is-flex is-justify-content-space-between">
-		<div>
-			{# MSG: Title of a control to change the key/pitch of the playing song. #}
-			<h4>{% trans %}Change Key{% endtrans %}</h4>
-		</div>
-		<div class="is-flex">
-			<h4 id="semitones-label"></h4>
-			<a id="semitones-info"> <i class="icon icon-info-circled-1" title="Info"></i></a>
-		</div>
+	<div class="is-flex is-justify-content-space-between is-align-items-center">
+		{# MSG: Title of a control to change the key/pitch of the playing song. #}
+		<h4 class="mb-0">{% trans %}Change Key{% endtrans %}</h4>
+		<span class="icon-text is-size-5 has-text-weight-bold">
+			<span id="semitones-label"></span>
+			<a id="semitones-info"><span class="icon"><i class="ph ph-info" title="Info"></i></span></a>
+		</span>
 	</div>
-	<div class="is-flex">
+	<div class="is-flex mt-3">
 		<input
 			type="range"
 			min="-12"
@@ -364,7 +381,7 @@
 	{% if mic_available %}
 	<div id="mic-live-panel" style="display: none">
 		<hr />
-		<h4><i class="icon icon-mic-1"></i> {% trans %}Microphones{% endtrans %}</h4>
+		<h4>{% trans %}Microphones{% endtrans %}</h4>
 		<div id="mic-live-list"></div>
 	</div>
 	{% endif %}
